@@ -9,14 +9,15 @@ import { registerPendingEditorFlush } from '../components/editor/editor-pending-
 import { useAppStore } from '../store'
 import { getDiskBaselineSignature } from '../../../shared/disk-baseline-signature'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../shared/constants'
-import { attachMobileMarkdownBridge } from './mobile-markdown-bridge'
+import { attachMobileMarkdownBridge, MOBILE_STALE_SAVE_MESSAGE } from './mobile-markdown-bridge'
 import {
   cleanupMobileMarkdownBridgeHarness,
   markdownUnifiedTab,
   openMarkdownFile,
   resetEditorState,
   sendRequest,
-  setupWindow
+  setupWindow,
+  guardedWriteRefusal
 } from './mobile-markdown-bridge-test-harness'
 
 vi.mock('@/lib/connection-context', () => ({
@@ -211,8 +212,13 @@ describe('mobile markdown bridge', () => {
       content: diskContent,
       isBinary: false
     }))
-    const writeFile = vi.fn().mockImplementation(async ({ content }) => {
+    const writeFile = vi.fn().mockImplementation(async ({ content, diskPrecondition }) => {
+      const refusal = guardedWriteRefusal(diskPrecondition, diskContent)
+      if (refusal) {
+        return refusal
+      }
       diskContent = content
+      return { ok: true }
     })
     setupWindow({ readFile, writeFile })
     const detachBridge = attachMobileMarkdownBridge()
@@ -248,18 +254,24 @@ describe('mobile markdown bridge', () => {
     }
   })
 
-  it('returns a failure to mobile, not an overwrite, when the desktop banner shows a disk change', async () => {
+  it('reports a refused phone save to the phone only, with its own message', async () => {
     openMarkdownFile()
     const tabId = useAppStore.getState().openFiles[0].id
-    useAppStore.getState().setLastKnownDiskSignature(tabId, getDiskBaselineSignature('older'))
-    useAppStore.getState().setExternalMutation(tabId, 'changed')
-    const readFile = vi.fn().mockResolvedValue({ content: 'original', isBinary: false })
-    // The host compares the precondition and refuses; a plain write would be the overwrite.
-    const writeFile = vi
-      .fn()
-      .mockImplementation(async ({ diskPrecondition }) =>
-        diskPrecondition ? { ok: false, diskConflict: 'changed' } : { ok: true }
-      )
+    // The tab never loaded on the desktop; the phone read 'original', then an agent wrote.
+    let diskContent = 'original'
+    const readFile = vi.fn().mockImplementation(async () => {
+      const content = diskContent
+      diskContent = 'agent rewrite'
+      return { content, isBinary: false }
+    })
+    const writeFile = vi.fn().mockImplementation(async ({ content, diskPrecondition }) => {
+      const refusal = guardedWriteRefusal(diskPrecondition, diskContent)
+      if (refusal) {
+        return refusal
+      }
+      diskContent = content
+      return { ok: true }
+    })
     setupWindow({ readFile, writeFile })
     const detachBridge = attachMobileMarkdownBridge()
     const detachAutosave = attachEditorAutosaveController(useAppStore as never)
@@ -275,9 +287,21 @@ describe('mobile markdown bridge', () => {
       })
 
       expect(writeFile).toHaveBeenCalledWith(
-        expect.objectContaining({ diskPrecondition: expect.anything() })
+        expect.objectContaining({
+          diskPrecondition: expect.objectContaining({
+            expectedSignature: getDiskBaselineSignature('original')
+          })
+        })
       )
-      expect(response).toMatchObject({ id: 'save-stale', ok: false })
+      expect(diskContent).toBe('agent rewrite')
+      expect(response).toMatchObject({
+        id: 'save-stale',
+        ok: false,
+        error: MOBILE_STALE_SAVE_MESSAGE
+      })
+      const tab = useAppStore.getState().openFiles.find((file) => file.id === tabId)
+      expect(tab?.externalMutation).toBeUndefined()
+      expect(tab?.isDirty).toBe(false)
     } finally {
       detachAutosave()
       detachBridge()

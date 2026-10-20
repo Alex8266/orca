@@ -21,6 +21,8 @@ import {
   type RuntimeMobileMarkdownRequest,
   type RuntimeMobileMarkdownResponse
 } from '../../../shared/mobile-markdown-document'
+import { getDiskBaselineSignature } from '../../../shared/disk-baseline-signature'
+import { EDITOR_STALE_SAVE_MESSAGE } from '@/components/editor/editor-save-disk-precondition'
 
 const saveQueues = new Map<string, Promise<void>>()
 
@@ -28,6 +30,9 @@ type FileContent = {
   content: string
   isBinary: boolean
 }
+
+export const MOBILE_STALE_SAVE_MESSAGE =
+  'This file changed on the computer. Reload to get the latest version, then reapply your edit.'
 
 export function attachMobileMarkdownBridge(): () => void {
   if (typeof window.api.ui.onMobileMarkdownRequest !== 'function') {
@@ -117,6 +122,13 @@ async function saveMobileMarkdownTab(
     }
 
     const state = useAppStore.getState()
+    if (current.source === 'file') {
+      // Why: a clean tab may never have mounted; the version mobile just verified is its baseline.
+      state.setLastKnownDiskSignature(
+        freshTarget.sourceFile.id,
+        getDiskBaselineSignature(current.content)
+      )
+    }
     const previousDraft = state.editorDrafts[freshTarget.sourceFile.id]
     const previousDirty = freshTarget.sourceFile.isDirty
     state.setEditorDraft(freshTarget.sourceFile.id, content)
@@ -130,6 +142,13 @@ async function saveMobileMarkdownTab(
       }
     } catch (error) {
       restoreFailedMobileSaveDraft(freshTarget.sourceFile.id, content, previousDraft, previousDirty)
+      if (error instanceof Error && error.message === EDITOR_STALE_SAVE_MESSAGE) {
+        // Why: desktop edits rode along in this save, so the desktop must learn of the conflict too.
+        if (previousDirty) {
+          useAppStore.getState().setExternalMutation(freshTarget.sourceFile.id, 'changed')
+        }
+        throw new Error(MOBILE_STALE_SAVE_MESSAGE)
+      }
       throw error
     }
 
@@ -299,7 +318,7 @@ async function waitForPositiveSave(file: OpenFile, content: string): Promise<voi
     if (!liveFile) {
       throw new Error('tab_not_found')
     }
-    await requestEditorFileSave({ fileId: file.id, fallbackContent: content })
+    await requestEditorFileSave({ fileId: file.id, fallbackContent: content, origin: 'mobile' })
     await saved
   } catch (error) {
     cleanup()

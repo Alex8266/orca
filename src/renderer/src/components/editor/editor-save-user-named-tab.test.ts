@@ -6,6 +6,7 @@ import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../../shared/constants'
 import { ORCA_EDITOR_SAVE_DIRTY_FILES_EVENT } from '../../../../shared/editor-save-events'
 import { attachEditorAutosaveController } from './editor-autosave-controller'
 import { __clearSelfWriteRegistryForTests } from './editor-self-write-registry'
+import { withLoadedBaselines } from './editor-autosave-controller-test-fixture'
 
 vi.mock('@/lib/connection-context', () => ({ getConnectionIdForFile: () => null }))
 
@@ -73,7 +74,7 @@ describe('saving a restored tab', () => {
       .openFile({ filePath, relativePath, worktreeId, language: 'markdown', mode: 'edit' })
     store.getState().setEditorDraft(filePath, 'edited')
     store.getState().markFileDirty(filePath, true)
-    const detach = attachEditorAutosaveController(store)
+    const detach = attachEditorAutosaveController(withLoadedBaselines(store))
     try {
       await saveDirtyFiles()
 
@@ -96,7 +97,7 @@ describe('saving a restored tab', () => {
     })
     store.getState().setEditorDraft('/repo/a.ts', 'edited')
     store.getState().markFileDirty('/repo/a.ts', true)
-    const detach = attachEditorAutosaveController(store)
+    const detach = attachEditorAutosaveController(withLoadedBaselines(store))
     try {
       await saveDirtyFiles()
 

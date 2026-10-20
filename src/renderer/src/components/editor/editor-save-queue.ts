@@ -2,7 +2,6 @@ import type { StoreApi } from 'zustand'
 import type { AppState } from '@/store'
 import type { OpenFile } from '@/store/slices/editor'
 import { findWorktreeById } from '@/store/slices/worktree-helpers'
-import { writeRuntimeFile } from '@/runtime/runtime-file-mutation-client'
 import { getEditorFileOperationContext } from '@/lib/editor-file-operation-owner'
 import {
   canAutoSaveOpenFile,
@@ -24,12 +23,12 @@ import { isEditorLargePasteInFlight } from './editor-large-paste-in-flight'
 import { getWrittenContentDiskSignature } from '../../../../shared/disk-baseline-signature'
 import type { FileWriteResult } from '../../../../shared/file-write-disk-precondition'
 import {
-  EDITOR_SAVE_OLDER_HOST_FALLBACK,
   editorModelSiblingTabs,
-  editorSaveDiskPrecondition,
+  editorSavePrecondition,
   editorTabModelUri,
   noteEditorBaselineWrite,
   waitForEditorBaselineRestamp,
+  writeEditorSave,
   type EditorSaveResult,
   type EditorSaveTrigger
 } from './editor-save-disk-precondition'
@@ -140,26 +139,23 @@ export function createEditorSaveQueue(store: AppStoreApi): EditorSaveQueue {
             : undefined
         )
         const siblings = editorModelSiblingTabs(state, liveFile)
-        const diskPrecondition = editorSaveDiskPrecondition(
-          liveFile,
-          siblings,
-          contentToSave,
-          trigger
-        )
-        if (diskPrecondition === 'unknown-baseline') {
+        const precondition = editorSavePrecondition(liveFile, siblings, trigger)
+        if (precondition.kind === 'blocked') {
           clearSelfWrite(liveFile.filePath, liveFile.runtimeEnvironmentId)
-          store.getState().setExternalMutation(file.id, 'changed')
+          // Why: a mobile refusal is reported to mobile; the desktop tab may not even be dirty.
+          if (trigger !== 'mobile') {
+            store.getState().setExternalMutation(file.id, 'changed')
+          }
           return 'blocked-stale'
         }
         let writeResult: FileWriteResult
         try {
-          writeResult = await writeRuntimeFile(
+          writeResult = await writeEditorSave(
             fileContext,
             liveFile.filePath,
             contentToSave,
             editorTabFileAccess(state, liveFile),
-            diskPrecondition ?? undefined,
-            EDITOR_SAVE_OLDER_HOST_FALLBACK
+            precondition
           )
         } catch (error) {
           // Why: the self-write stamp is only valid after a real write; clear on failure so it can't suppress a real update.
@@ -169,12 +165,14 @@ export function createEditorSaveQueue(store: AppStoreApi): EditorSaveQueue {
         if (!writeResult.ok) {
           clearSelfWrite(liveFile.filePath, liveFile.runtimeEnvironmentId)
           // Why: the banner (or deleted tombstone) explains the refusal and pauses autosave.
-          store
-            .getState()
-            .setExternalMutation(
-              file.id,
-              writeResult.diskConflict === 'missing' ? 'deleted' : 'changed'
-            )
+          if (trigger !== 'mobile') {
+            store
+              .getState()
+              .setExternalMutation(
+                file.id,
+                writeResult.diskConflict === 'missing' ? 'deleted' : 'changed'
+              )
+          }
           return 'blocked-stale'
         }
 

@@ -6,6 +6,7 @@ import { createStore, type StoreApi } from 'zustand/vanilla'
 import { createEditorSlice } from '@/store/slices/editor'
 import type { AppState } from '@/store'
 import { makeWorktree } from '@/store/slices/worktrees-slice-test-fixtures'
+import { getDiskBaselineSignature } from '../../../../shared/disk-baseline-signature'
 
 export type FakeEditorDisk = {
   files: Map<string, string>
@@ -112,5 +113,19 @@ export function createUntitledNoteStore(fileName: string): StoreApi<AppState> {
     mode: 'edit',
     isUntitled: true
   })
+  return store
+}
+
+/**
+ * Suites whose tabs stand for files already loaded from disk: give each tab without one the
+ * baseline a load would stamp, since saves with no known disk version are refused.
+ */
+export function withLoadedBaselines<T extends Pick<StoreApi<AppState>, 'getState'>>(store: T): T {
+  const state = store.getState()
+  for (const file of state.openFiles) {
+    if (file.lastKnownDiskSignature === undefined) {
+      state.setLastKnownDiskSignature(file.id, getDiskBaselineSignature(''))
+    }
+  }
   return store
 }

@@ -7,6 +7,7 @@ import type { AppState } from '@/store/types'
 import { attachEditorAutosaveController } from './editor-autosave-controller'
 import { requestEditorFileSave } from './editor-autosave'
 import { migrateRestoredEditorFileOwner } from './migrate-restored-editor-file-owner'
+import { withLoadedBaselines } from './editor-autosave-controller-test-fixture'
 
 const mocks = vi.hoisted(() => ({ writeRuntimeFile: vi.fn() }))
 
@@ -79,7 +80,7 @@ describe('restored editor owner save lifecycle', () => {
     const oldId = seed()
     const firstWrite = deferred()
     mocks.writeRuntimeFile.mockReturnValueOnce(firstWrite.promise).mockResolvedValue({ ok: true })
-    detach = attachEditorAutosaveController(useAppStore)
+    detach = attachEditorAutosaveController(withLoadedBaselines(useAppStore))
     useAppStore.getState().setEditorDraft(oldId, 'source save')
     useAppStore.getState().markFileDirty(oldId, true)
 
@@ -127,7 +128,7 @@ describe('restored editor owner save lifecycle', () => {
     const oldId = seed()
     const firstWrite = deferred()
     mocks.writeRuntimeFile.mockReturnValueOnce(firstWrite.promise)
-    detach = attachEditorAutosaveController(useAppStore)
+    detach = attachEditorAutosaveController(withLoadedBaselines(useAppStore))
     useAppStore.getState().setEditorDraft(oldId, 'source save')
     useAppStore.getState().markFileDirty(oldId, true)
 
@@ -153,7 +154,7 @@ describe('restored editor owner save lifecycle', () => {
     const oldId = seed()
     const firstWrite = deferred()
     mocks.writeRuntimeFile.mockReturnValueOnce(firstWrite.promise)
-    detach = attachEditorAutosaveController(useAppStore)
+    detach = attachEditorAutosaveController(withLoadedBaselines(useAppStore))
     useAppStore.getState().setEditorDraft(oldId, 'source save')
     useAppStore.getState().markFileDirty(oldId, true)
 
@@ -195,7 +196,7 @@ describe('restored editor owner save lifecycle', () => {
     } as unknown as Partial<AppState>)
     const firstWrite = deferred()
     mocks.writeRuntimeFile.mockReturnValueOnce(firstWrite.promise)
-    detach = attachEditorAutosaveController(useAppStore)
+    detach = attachEditorAutosaveController(withLoadedBaselines(useAppStore))
     useAppStore.getState().setEditorDraft(oldId, 'source save')
     useAppStore.getState().markFileDirty(oldId, true)
 
@@ -249,7 +250,7 @@ describe('restored editor owner save lifecycle', () => {
     })
     const firstWrite = deferred()
     mocks.writeRuntimeFile.mockReturnValueOnce(firstWrite.promise)
-    detach = attachEditorAutosaveController(useAppStore)
+    detach = attachEditorAutosaveController(withLoadedBaselines(useAppStore))
     useAppStore.getState().setEditorDraft(oldId, 'source save')
     useAppStore.getState().markFileDirty(oldId, true)
 

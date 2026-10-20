@@ -160,32 +160,23 @@ describe('editor saves guarded by the disk precondition', () => {
     }
   })
 
-  it('saves a file with no known disk version only where none exists yet', async () => {
-    const newPath = '/repo/new.ts'
-    const takenPath = '/repo/taken.ts'
-    const disk = stubGuardedDisk({ [takenPath]: 'someone else' })
+  it('refuses a save with no known disk version instead of writing unchecked', async () => {
+    const disk = stubGuardedDisk({ [PATH]: 'someone else' })
     const store = createEditorStore()
-    openFile(store, { filePath: newPath, draft: 'fresh' })
-    openFile(store, { filePath: takenPath, draft: 'mine' })
+    openFile(store, { draft: 'mine' })
 
     const cleanup = attachEditorAutosaveController(store)
     try {
-      await requestEditorFileSave({ fileId: newPath })
-      expect(disk.writeFile).toHaveBeenLastCalledWith(
-        expect.objectContaining({
-          diskPrecondition: {
-            expectedSignature: getWrittenContentDiskSignature('fresh'),
-            allowMissing: true
-          }
-        })
-      )
-      expect(disk.files.get(newPath)).toBe('fresh')
+      await expect(requestEditorFileSave({ fileId: PATH })).rejects.toThrow(/changed on disk/)
+      await vi.advanceTimersByTimeAsync(1500)
 
-      await expect(requestEditorFileSave({ fileId: takenPath })).rejects.toThrow(/changed on disk/)
-      expect(disk.files.get(takenPath)).toBe('someone else')
-      expect(store.getState().openFiles.find((f) => f.id === takenPath)?.externalMutation).toBe(
-        'changed'
-      )
+      expect(disk.writeFile).not.toHaveBeenCalled()
+      expect(disk.files.get(PATH)).toBe('someone else')
+      expect(store.getState().openFiles[0]?.externalMutation).toBe('changed')
+
+      // The banner's Overwrite is the way out.
+      expect(await overwriteDiskWithTabEdits(store.getState().openFiles[0])).toBe(true)
+      expect(disk.files.get(PATH)).toBe('mine')
     } finally {
       cleanup()
     }

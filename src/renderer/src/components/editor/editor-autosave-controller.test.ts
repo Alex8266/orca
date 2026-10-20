@@ -16,6 +16,7 @@ import {
 } from '@/runtime/runtime-compatibility-test-fixture'
 import { clearRuntimeCompatibilityCacheForTests } from '@/runtime/runtime-rpc-client'
 import { folderWorkspaceKey } from '../../../../shared/workspace-scope'
+import { withLoadedBaselines } from './editor-autosave-controller-test-fixture'
 
 const mocks = vi.hoisted(() => ({
   getConnectionIdForFile: vi.fn()
@@ -178,7 +179,7 @@ describe('attachEditorAutosaveController', () => {
     store.getState().setEditorDraft('/repo/file.ts', 'edited')
     store.getState().markFileDirty('/repo/file.ts', true)
 
-    const cleanup = attachEditorAutosaveController(store)
+    const cleanup = attachEditorAutosaveController(withLoadedBaselines(store))
     try {
       await requestDirtyFileSave()
 
@@ -249,7 +250,7 @@ describe('attachEditorAutosaveController', () => {
     store.getState().setEditorDraft('/home/neil/platform/api/src/file.ts', 'edited')
     store.getState().markFileDirty('/home/neil/platform/api/src/file.ts', true)
 
-    const cleanup = attachEditorAutosaveController(store)
+    const cleanup = attachEditorAutosaveController(withLoadedBaselines(store))
     try {
       await requestDirtyFileSave()
 
@@ -331,7 +332,7 @@ describe('attachEditorAutosaveController', () => {
     store.getState().setEditorDraft('/runtime/folder/src/file.ts', 'edited')
     store.getState().markFileDirty('/runtime/folder/src/file.ts', true)
 
-    const cleanup = attachEditorAutosaveController(store)
+    const cleanup = attachEditorAutosaveController(withLoadedBaselines(store))
     try {
       await requestDirtyFileSave()
 
@@ -405,7 +406,7 @@ describe('attachEditorAutosaveController', () => {
     store.getState().setEditorDraft('/remote/repo/file.ts', 'edited')
     store.getState().markFileDirty('/remote/repo/file.ts', true)
 
-    const cleanup = attachEditorAutosaveController(store)
+    const cleanup = attachEditorAutosaveController(withLoadedBaselines(store))
     try {
       await requestDirtyFileSave()
 
@@ -459,7 +460,7 @@ describe('attachEditorAutosaveController', () => {
     const unregisterFlush = registerPendingEditorFlush('/repo/file.md', () => {
       store.getState().setEditorDraft('/repo/file.md', 'pending rich edit')
     })
-    const cleanup = attachEditorAutosaveController(store)
+    const cleanup = attachEditorAutosaveController(withLoadedBaselines(store))
     try {
       await requestDirtyFileSave()
 
@@ -504,7 +505,7 @@ describe('attachEditorAutosaveController', () => {
       mode: 'edit'
     })
 
-    const cleanup = attachEditorAutosaveController(store)
+    const cleanup = attachEditorAutosaveController(withLoadedBaselines(store))
     try {
       store.getState().setEditorDraft('/repo/file.ts', 'edited')
       store.getState().markFileDirty('/repo/file.ts', true)
@@ -544,7 +545,7 @@ describe('attachEditorAutosaveController', () => {
       language: 'typescript',
       mode: 'edit'
     })
-    const cleanup = attachEditorAutosaveController(store)
+    const cleanup = attachEditorAutosaveController(withLoadedBaselines(store))
     try {
       store.getState().setEditorDraft('/repo/file.ts', 'first autosave')
       store.getState().markFileDirty('/repo/file.ts', true)
@@ -595,7 +596,7 @@ describe('attachEditorAutosaveController', () => {
     store.getState().setEditorDraft('/repo/file.md', '')
     store.getState().markFileDirty('/repo/file.md', true)
 
-    const cleanup = attachEditorAutosaveController(store)
+    const cleanup = attachEditorAutosaveController(withLoadedBaselines(store))
     try {
       await requestEditorHotExitBackup()
       await vi.advanceTimersByTimeAsync(1000)
@@ -637,7 +638,7 @@ describe('attachEditorAutosaveController', () => {
     store.getState().setEditorDraft('/repo/file.md', 'diff edit')
     store.getState().markFileDirty('/repo/file.md', true)
 
-    const cleanup = attachEditorAutosaveController(store)
+    const cleanup = attachEditorAutosaveController(withLoadedBaselines(store))
     try {
       await expect(requestEditorHotExitBackup()).rejects.toThrow(
         'Some unsaved editor changes cannot be backed up before restart.'
@@ -732,7 +733,7 @@ describe('attachEditorAutosaveController', () => {
         store.getState().setEditorDraft('/repo/file.md', nextDraft)
       }
     })
-    const cleanup = attachEditorAutosaveController(store)
+    const cleanup = attachEditorAutosaveController(withLoadedBaselines(store))
     try {
       await requestEditorSaveQuiesce({ fileId: '/repo/file.md' })
       expect(store.getState().editorDrafts['/repo/file.md']).toBe('after quiesce')
@@ -781,7 +782,7 @@ describe('attachEditorAutosaveController', () => {
     store.getState().setEditorDraft('/repo/file.md', 'edited')
     store.getState().markFileDirty('/repo/file.md', true)
 
-    const cleanup = attachEditorAutosaveController(store)
+    const cleanup = attachEditorAutosaveController(withLoadedBaselines(store))
     try {
       await expect(requestEditorFileSave({ fileId: '/repo/file.md' })).rejects.toThrow('disk full')
       expect(hasRecentSelfWrite('/repo/file.md')).toBe(false)

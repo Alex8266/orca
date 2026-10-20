@@ -3,14 +3,8 @@ import { join, relative } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const EDITOR_DIR = __dirname
-const WRITE_CALL = /\b(?:writeRuntimeFile|fs\.writeFile)\s*\(/
-
-// Every editor surface that writes a file: tabs of any mode (edit, rich, notebook, CSV, unstaged
-// diff) through the save queue, and combined-diff sections.
-const GUARDED_WRITERS = [
-  'combined-diff/review-controls/use-combined-diff-section-actions.ts',
-  'editor-save-queue.ts'
-]
+const RAW_WRITE = /\b(?:writeRuntimeFile|fs\.writeFile)\s*\(/
+const EDITOR_WRITE = /\bwriteEditorSave\s*\(/
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((name) => {
@@ -22,52 +16,58 @@ function sourceFiles(dir: string): string[] {
   })
 }
 
-function writeCallArguments(source: string): string[] {
-  return source
-    .split('writeRuntimeFile(')
-    .slice(1)
-    .map((rest) => {
-      let depth = 1
-      for (let i = 0; i < rest.length; i += 1) {
-        depth += rest[i] === '(' ? 1 : rest[i] === ')' ? -1 : 0
-        if (depth === 0) {
-          return rest.slice(0, i)
-        }
-      }
-      return rest
-    })
+function filesMatching(dir: string, pattern: RegExp): string[] {
+  return sourceFiles(dir)
+    .filter((path) => pattern.test(readFileSync(path, 'utf8')))
+    .map((path) => relative(EDITOR_DIR, path).split('\\').join('/'))
+    .sort()
+}
+
+function functionBody(source: string, name: string): string {
+  const body = source.slice(source.indexOf(`export function ${name}`))
+  return body.slice(0, body.indexOf('\n}\n'))
 }
 
 describe('editor save paths', () => {
-  it('write files only from the known guarded writers', () => {
-    const writers = sourceFiles(EDITOR_DIR)
-      .filter((path) => WRITE_CALL.test(readFileSync(path, 'utf8')))
-      .map((path) => relative(EDITOR_DIR, path).split('\\').join('/'))
-    expect(writers.sort()).toEqual(GUARDED_WRITERS)
-  })
-
-  it.each(GUARDED_WRITERS)(
-    '%s sends a precondition and the named older-host fallback',
-    (writer) => {
-      const calls = writeCallArguments(readFileSync(join(EDITOR_DIR, writer), 'utf8'))
-      expect(calls).toHaveLength(1)
-      expect(calls[0]).toContain('diskPrecondition')
-      expect(calls[0]).toContain('EDITOR_SAVE_OLDER_HOST_FALLBACK')
-    }
-  )
-
-  it('grants overwrite consent only from the conflict banner', () => {
-    const grants = sourceFiles(join(EDITOR_DIR, '..', '..'))
-      .filter((path) => /overwrite: true|\? 'overwrite'/.test(readFileSync(path, 'utf8')))
-      .map((path) => relative(EDITOR_DIR, path).split('\\').join('/'))
-    expect(grants.sort()).toEqual(['ExternalFileChangeBanner.tsx', 'editor-autosave-controller.ts'])
-  })
-
-  it('drops the queue guard only for the explicit Overwrite, whatever the tab mode', () => {
+  it('make the raw file write only inside writeEditorSave', () => {
+    expect(filesMatching(EDITOR_DIR, RAW_WRITE)).toEqual(['editor-save-disk-precondition.ts'])
     const source = readFileSync(join(EDITOR_DIR, 'editor-save-disk-precondition.ts'), 'utf8')
-    const body = source.slice(source.indexOf('export function editorSaveDiskPrecondition'))
-    const fn = body.slice(0, body.indexOf('\n}\n'))
-    expect(fn.match(/return null/g)).toHaveLength(1)
-    expect(fn).not.toContain('mode')
+    expect(source.split('writeRuntimeFile(')).toHaveLength(2)
+    const writer = functionBody(source, 'writeEditorSave')
+    expect(writer).toContain('writeRuntimeFile(')
+    // The plain write is reachable only as the writer layer's older-host fallback.
+    expect(writer).toContain('EDITOR_SAVE_OLDER_HOST_FALLBACK')
+    expect(writer).toContain("write.kind === 'guarded'")
+  })
+
+  it('route every editor surface that saves a file through writeEditorSave', () => {
+    expect(filesMatching(EDITOR_DIR, EDITOR_WRITE)).toEqual([
+      'combined-diff/review-controls/use-combined-diff-section-actions.ts',
+      'editor-save-disk-precondition.ts',
+      'editor-save-queue.ts'
+    ])
+  })
+
+  it('never turn a missing or disputed baseline into a write', () => {
+    const source = readFileSync(join(EDITOR_DIR, 'editor-save-disk-precondition.ts'), 'utf8')
+    const builder = functionBody(source, 'editorSavePrecondition')
+    expect(builder).not.toMatch(/return null|return undefined/)
+    expect(builder.match(/kind: 'explicit-overwrite'/g)).toHaveLength(1)
+    expect(builder).toMatch(
+      /if \(trigger === 'overwrite'\) \{\n\s*return \{ kind: 'explicit-overwrite' \}/
+    )
+    expect(builder).not.toContain('mode')
+  })
+
+  it('grant overwrite consent only from the conflict UI', () => {
+    const grants = filesMatching(
+      join(EDITOR_DIR, '..', '..'),
+      /overwrite: true|\? 'overwrite'|, 'overwrite'\)/
+    )
+    expect(grants).toEqual([
+      'DiffSectionItem.tsx',
+      'ExternalFileChangeBanner.tsx',
+      'editor-autosave-controller.ts'
+    ])
   })
 })

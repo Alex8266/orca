@@ -28,6 +28,7 @@ import {
 import { createEditorSaveQueue } from '@/components/editor/editor-save-queue'
 import { editorTabDocumentFolderAccess, editorTabFileAccess } from './local-file-access'
 import { renameFileOnDisk } from './rename-file'
+import { withLoadedBaselines } from '@/components/editor/editor-autosave-controller-test-fixture'
 
 const PROJECT = '/Users/me/project'
 const WT = `repo-local::${PROJECT}`
@@ -98,7 +99,7 @@ async function expectUserNamedAt(filePath: string): Promise<void> {
   expect(editorTabFileAccess(state, restored)).toEqual({ kind: 'user-file' })
 
   mocks.writeRuntimeFile.mockClear()
-  await createEditorSaveQueue(useAppStore).queueSave(tab, 'edited', 'user')
+  await createEditorSaveQueue(withLoadedBaselines(useAppStore)).queueSave(tab, 'edited', 'user')
   expect(mocks.writeRuntimeFile).toHaveBeenCalledWith(
     expect.anything(),
     filePath,

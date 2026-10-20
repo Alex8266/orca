@@ -16147,6 +16147,7 @@
           "3fa2b8d417": "Recharger depuis le disque",
           "a95d02c644": "Garder mes modifications",
           "overwrite": "Overwrite",
+          "keepHint": "Keeps your version. Your next save replaces the version on disk.",
           "5c02de9b31": "Rechargé depuis le disque",
           "d1e830fa22": "Annuler",
           "90b2ce7d43": "Comparer"
@@ -16190,7 +16191,7 @@
               "notice": "This file changed on disk since your edits. Use the banner to compare, reload, or overwrite."
             },
             "sectionStale": {
-              "notice": "This file changed on disk since this section loaded. Open the file to review it before saving."
+              "notice": "This file changed on disk since this section loaded."
             }
           }
         },

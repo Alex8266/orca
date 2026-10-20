@@ -187,10 +187,22 @@ export function ExternalFileChangeBanner({
               'Reload from Disk'
             )}
           </Button>
-          <Button type="button" size="xs" variant="outline" onClick={handleOverwrite}>
-            {translate('auto.components.editor.ExternalFileChangeBanner.overwrite', 'Overwrite')}
-          </Button>
-          <Button type="button" size="xs" variant="ghost" onClick={handleKeepEdits}>
+          {/* Why: with no unsaved edits there is nothing to write over the newer disk version. */}
+          {file.isDirty && (
+            <Button type="button" size="xs" variant="outline" onClick={handleOverwrite}>
+              {translate('auto.components.editor.ExternalFileChangeBanner.overwrite', 'Overwrite')}
+            </Button>
+          )}
+          <Button
+            type="button"
+            size="xs"
+            variant="ghost"
+            onClick={handleKeepEdits}
+            title={translate(
+              'auto.components.editor.ExternalFileChangeBanner.keepHint',
+              'Keeps your version. Your next save replaces the version on disk.'
+            )}
+          >
             {translate(
               'auto.components.editor.ExternalFileChangeBanner.a95d02c644',
               'Keep My Edits'

@@ -6,9 +6,8 @@ import type { DiffSection } from '../../diff-section-types'
 import type { OpenFile } from '@/store/slices/editor'
 import { useCombinedDiffSectionActions } from './use-combined-diff-section-actions'
 
-const mocks = vi.hoisted(() => ({ writeRuntimeFile: vi.fn(), toastError: vi.fn() }))
+const mocks = vi.hoisted(() => ({ writeRuntimeFile: vi.fn() }))
 
-vi.mock('sonner', () => ({ toast: { error: mocks.toastError } }))
 vi.mock('@/runtime/runtime-file-mutation-client', () => ({
   writeRuntimeFile: mocks.writeRuntimeFile
 }))
@@ -26,7 +25,6 @@ vi.mock('@/store', () => {
 afterEach(() => {
   cleanup()
   mocks.writeRuntimeFile.mockReset()
-  mocks.toastError.mockReset()
 })
 
 const file: OpenFile = {
@@ -60,7 +58,7 @@ function section(): DiffSection {
   }
 }
 
-it('guards every section save with its loaded signature and reports a refusal', async () => {
+it('guards section saves, marks a refusal as a section conflict, and overwrites only on request', async () => {
   const sections = [section()]
   const setSections = vi.fn()
   const { result } = renderHook(() =>
@@ -82,17 +80,18 @@ it('guards every section save with its loaded signature and reports a refusal', 
 
   mocks.writeRuntimeFile.mockResolvedValueOnce({ ok: false, diskConflict: 'changed' })
   await act(() => result.current.handleSectionSaveRef.current(0))
-  expect(mocks.writeRuntimeFile.mock.calls[0]?.[4]).toEqual({
-    expectedSignature: getDiskBaselineSignature('loaded')
-  })
+  const guarded = { expectedSignature: getDiskBaselineSignature('loaded'), allowMissing: false }
+  expect(mocks.writeRuntimeFile.mock.calls[0]?.[4]).toEqual(guarded)
   expect(mocks.writeRuntimeFile.mock.calls[0]?.[5]).toBe('unguarded-write')
-  expect(mocks.toastError).toHaveBeenCalledWith(expect.stringMatching(/changed on disk/))
-  expect(setSections).not.toHaveBeenCalled()
+  const [[markConflict]] = setSections.mock.calls
+  expect(markConflict(sections)).toEqual([{ ...sections[0], saveConflict: true }])
 
-  // Saving again is not consent to overwrite.
-  mocks.writeRuntimeFile.mockResolvedValueOnce({ ok: true })
+  // Saving again stays guarded; only the conflict bar's Overwrite writes plain.
+  mocks.writeRuntimeFile.mockResolvedValueOnce({ ok: false, diskConflict: 'changed' })
   await act(() => result.current.handleSectionSaveRef.current(0))
-  expect(mocks.writeRuntimeFile.mock.calls[1]?.[4]).toEqual({
-    expectedSignature: getDiskBaselineSignature('loaded')
-  })
+  expect(mocks.writeRuntimeFile.mock.calls[1]?.[4]).toEqual(guarded)
+
+  mocks.writeRuntimeFile.mockResolvedValueOnce({ ok: true })
+  await act(() => result.current.handleSectionSaveRef.current(0, 'overwrite'))
+  expect(mocks.writeRuntimeFile.mock.calls[2]?.[4]).toBeUndefined()
 })

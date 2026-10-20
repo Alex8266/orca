@@ -426,7 +426,7 @@
         "editor": {
           "save": {
             "sectionStale": {
-              "notice": "This file changed on disk since this section loaded. Open the file to review it before saving."
+              "notice": "This file changed on disk since this section loaded."
             },
             "stale": {
               "notice": "This file changed on disk since your edits. Use the banner to compare, reload, or overwrite."

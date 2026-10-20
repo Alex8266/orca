@@ -6,7 +6,6 @@ import { detectLanguage } from '@/lib/language-detect'
 import { joinPath } from '@/lib/path'
 import { openFilePreviewToSide } from '@/lib/file-preview'
 import { getEditorFileOperationContext } from '@/lib/editor-file-operation-owner'
-import { writeRuntimeFile } from '@/runtime/runtime-file-mutation-client'
 import { findWorktreeById } from '@/store/slices/worktree-helpers'
 import type { OpenFile } from '@/store/slices/editor'
 import type { GitBranchChangeEntry } from '../../../../../../shared/git-diff-compare-types'
@@ -16,14 +15,8 @@ import { getStoredTextDiffContent, getStoredTextDiffResult } from '../../large-d
 import { removeDiffSectionMeasuredHeight } from '../../diff-section-height-cache'
 import type { DiffSection } from '../../diff-section-types'
 import type { DiffSectionItemProps } from '../../diff-section-item-props'
-import { toast } from 'sonner'
-import { translate } from '@/i18n/i18n'
-import { missingOrIdenticalPrecondition } from '../../../../../../shared/file-write-disk-precondition'
 import { getDiskBaselineSignature } from '../../../../../../shared/disk-baseline-signature'
-import { EDITOR_SAVE_OLDER_HOST_FALLBACK } from '../../editor-save-disk-precondition'
-
-const SECTION_STALE_MESSAGE =
-  'This file changed on disk since this section loaded. Open the file to review it before saving.'
+import { writeEditorSave } from '../../editor-save-disk-precondition'
 
 export type CombinedDiffSectionActions = {
   handleSectionSaveRef: DiffSectionItemProps['handleSectionSaveRef']
@@ -161,7 +154,7 @@ export function useCombinedDiffSectionActions({
   )
 
   const handleSectionSave = useCallback(
-    async (index: number) => {
+    async (index: number, mode?: 'overwrite') => {
       const section = sections[index]
       if (!section) {
         return
@@ -181,16 +174,20 @@ export function useCombinedDiffSectionActions({
         !(section.diffResult.modifiedContent === '' && section.largeDiffRenderLimit?.limited)
           ? section.diffResult.modifiedContent
           : undefined
-      const diskPrecondition =
-        loaded !== undefined
-          ? { expectedSignature: getDiskBaselineSignature(loaded) }
-          : missingOrIdenticalPrecondition(content)
+      const markConflict = (): void =>
+        setSections((prev) =>
+          prev.map((s) => (s.key === sectionKey ? { ...s, saveConflict: true } : s))
+        )
+      if (loaded === undefined && mode !== 'overwrite') {
+        markConflict()
+        return
+      }
       try {
         const state = useAppStore.getState()
         const worktree = file.worktreeId
           ? findWorktreeById(state.worktreesByRepo, file.worktreeId)
           : null
-        const writeResult = await writeRuntimeFile(
+        const writeResult = await writeEditorSave(
           getEditorFileOperationContext(
             state,
             {
@@ -203,16 +200,12 @@ export function useCombinedDiffSectionActions({
           absolutePath,
           content,
           undefined,
-          diskPrecondition,
-          EDITOR_SAVE_OLDER_HOST_FALLBACK
+          mode === 'overwrite' || loaded === undefined
+            ? { kind: 'explicit-overwrite' }
+            : { kind: 'guarded', signature: getDiskBaselineSignature(loaded), allowMissing: false }
         )
         if (!writeResult.ok) {
-          toast.error(
-            translate(
-              'auto.components.editor.editor.save.sectionStale.notice',
-              SECTION_STALE_MESSAGE
-            )
-          )
+          markConflict()
           return
         }
         // Why: the section list can be rebuilt while the write is pending, so re-resolve
@@ -233,6 +226,7 @@ export function useCombinedDiffSectionActions({
                 ...s,
                 modifiedContent: content,
                 dirty: false,
+                saveConflict: undefined,
                 largeDiffRenderLimit: s.largeDiffRenderLimit
               }
             }
@@ -249,6 +243,7 @@ export function useCombinedDiffSectionActions({
               modifiedContent: storedContent.modifiedContent,
               originalContent: storedContent.originalContent,
               dirty: false,
+              saveConflict: undefined,
               diffResult: getStoredTextDiffResult(nextDiffResult, nextLargeDiffRenderLimit),
               largeDiffRenderLimit: nextLargeDiffRenderLimit
             }

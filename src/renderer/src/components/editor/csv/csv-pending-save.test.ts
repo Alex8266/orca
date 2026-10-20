@@ -3,7 +3,8 @@ import { createEditorSaveQueue } from '../editor-save-queue'
 import { registerPendingEditorFlush } from '../editor-pending-flush'
 import {
   createEditorStore,
-  stubEditorWindowWithDisk
+  stubEditorWindowWithDisk,
+  withLoadedBaselines
 } from '../editor-autosave-controller-test-fixture'
 
 afterEach(() => vi.unstubAllGlobals())
@@ -21,7 +22,7 @@ function setup() {
   const file = store.getState().openFiles[0]!
   store.getState().setEditorDraft(file.id, 'header\nprevious')
   store.getState().markFileDirty(file.id, true)
-  const queue = createEditorSaveQueue(store)
+  const queue = createEditorSaveQueue(withLoadedBaselines(store))
   return { disk, store, file, queue }
 }
 
