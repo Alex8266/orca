@@ -15,7 +15,6 @@ export type GuardedWriteArgs = {
   filePath: string
   content: string
   diskPrecondition?: FileWriteDiskPrecondition
-  olderHostFallback?: string
 }
 
 /** `beforeWrite` lets a test hold a write in flight. */

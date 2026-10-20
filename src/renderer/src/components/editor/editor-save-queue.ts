@@ -7,6 +7,7 @@ import {
   canAutoSaveOpenFile,
   isAutosaveSuspendedForFile,
   normalizeAutoSaveDelayMs,
+  ORCA_EDITOR_FILE_REBASELINED_EVENT,
   ORCA_EDITOR_FILE_SAVED_EVENT,
   type EditorFileSavedDetail
 } from './editor-autosave'
@@ -190,6 +191,12 @@ export function createEditorSaveQueue(store: AppStoreApi): EditorSaveQueue {
           ) {
             noteEditorBaselineWrite(sibling.id)
             store.getState().setLastKnownDiskSignature(sibling.id, writtenSignature)
+            // Why: fingerprint and cached text move together, or a remount pushes stale text.
+            window.dispatchEvent(
+              new CustomEvent<EditorFileSavedDetail>(ORCA_EDITOR_FILE_REBASELINED_EVENT, {
+                detail: { fileId: sibling.id, content: contentToSave }
+              })
+            )
           }
         }
         if ((saveGeneration.get(file.id) ?? 0) !== queuedGeneration) {

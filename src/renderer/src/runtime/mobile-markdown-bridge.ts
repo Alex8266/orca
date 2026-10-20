@@ -21,8 +21,10 @@ import {
   type RuntimeMobileMarkdownRequest,
   type RuntimeMobileMarkdownResponse
 } from '../../../shared/mobile-markdown-document'
-import { getDiskBaselineSignature } from '../../../shared/disk-baseline-signature'
-import { EDITOR_STALE_SAVE_MESSAGE } from '@/components/editor/editor-save-disk-precondition'
+import {
+  rollBackFailedMobileSave,
+  stampMobileVerifiedBaseline
+} from './mobile-markdown-save-rollback'
 
 const saveQueues = new Map<string, Promise<void>>()
 
@@ -30,9 +32,6 @@ type FileContent = {
   content: string
   isBinary: boolean
 }
-
-export const MOBILE_STALE_SAVE_MESSAGE =
-  'This file changed on the computer. Reload to get the latest version, then reapply your edit.'
 
 export function attachMobileMarkdownBridge(): () => void {
   if (typeof window.api.ui.onMobileMarkdownRequest !== 'function') {
@@ -122,13 +121,7 @@ async function saveMobileMarkdownTab(
     }
 
     const state = useAppStore.getState()
-    if (current.source === 'file') {
-      // Why: a clean tab may never have mounted; the version mobile just verified is its baseline.
-      state.setLastKnownDiskSignature(
-        freshTarget.sourceFile.id,
-        getDiskBaselineSignature(current.content)
-      )
-    }
+    const stampedBaseline = stampMobileVerifiedBaseline(freshTarget.sourceFile, current)
     const previousDraft = state.editorDrafts[freshTarget.sourceFile.id]
     const previousDirty = freshTarget.sourceFile.isDirty
     state.setEditorDraft(freshTarget.sourceFile.id, content)
@@ -141,15 +134,13 @@ async function saveMobileMarkdownTab(
         throw new Error('save_verification_failed')
       }
     } catch (error) {
-      restoreFailedMobileSaveDraft(freshTarget.sourceFile.id, content, previousDraft, previousDirty)
-      if (error instanceof Error && error.message === EDITOR_STALE_SAVE_MESSAGE) {
-        // Why: desktop edits rode along in this save, so the desktop must learn of the conflict too.
-        if (previousDirty) {
-          useAppStore.getState().setExternalMutation(freshTarget.sourceFile.id, 'changed')
-        }
-        throw new Error(MOBILE_STALE_SAVE_MESSAGE)
-      }
-      throw error
+      throw rollBackFailedMobileSave(error, {
+        fileId: freshTarget.sourceFile.id,
+        injectedContent: content,
+        previousDraft,
+        previousDirty,
+        stampedBaseline
+      })
     }
 
     return {
@@ -159,27 +150,6 @@ async function saveMobileMarkdownTab(
       content: verified
     }
   })
-}
-
-function restoreFailedMobileSaveDraft(
-  fileId: string,
-  injectedContent: string,
-  previousDraft: string | undefined,
-  previousDirty: boolean
-): void {
-  const state = useAppStore.getState()
-  const currentDraft = state.editorDrafts[fileId]
-  if (currentDraft !== undefined && currentDraft !== injectedContent) {
-    return
-  }
-  // Why: mobile save injects a desktop draft only to reuse the editor save path.
-  // If save or verification fails, put the desktop editor back exactly as it was before.
-  if (previousDraft === undefined) {
-    state.clearEditorDraft(fileId)
-  } else {
-    state.setEditorDraft(fileId, previousDraft)
-  }
-  state.markFileDirty(fileId, previousDirty)
 }
 
 async function enqueueMarkdownSave<T>(fileId: string, save: () => Promise<T>): Promise<T> {

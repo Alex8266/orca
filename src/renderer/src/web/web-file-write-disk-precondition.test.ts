@@ -51,21 +51,6 @@ describe('paired web client save precondition', () => {
     expect(callRuntimeResult.mock.calls[0]?.[1]).toMatchObject({ diskPrecondition: precondition })
   })
 
-  it('takes the plain write through an older server under the unguarded-write fallback', async () => {
-    const { methods, callRuntimeResult, calledMethods } = methodsFor([], 'agent rewrite')
-
-    const result = await methods.writeFile({
-      filePath: '/hub/repo/readme.md',
-      content: 'edited',
-      diskPrecondition: precondition,
-      olderHostFallback: 'unguarded-write'
-    })
-
-    expect(result).toEqual({ ok: true })
-    expect(calledMethods()).toEqual(['files.write'])
-    expect(callRuntimeResult.mock.calls[0]?.[1]).not.toHaveProperty('diskPrecondition')
-  })
-
   it('refuses without writing when an older server holds newer disk content', async () => {
     const { methods, calledMethods } = methodsFor([], 'agent rewrite')
 

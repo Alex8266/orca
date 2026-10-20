@@ -7,6 +7,10 @@ import { createEditorSlice } from '@/store/slices/editor'
 import type { AppState } from '@/store'
 import { makeWorktree } from '@/store/slices/worktrees-slice-test-fixtures'
 import { getDiskBaselineSignature } from '../../../../shared/disk-baseline-signature'
+import {
+  compareDiskWritePrecondition,
+  type FileWriteDiskPrecondition
+} from '../../../../shared/file-write-disk-precondition'
 
 export type FakeEditorDisk = {
   files: Map<string, string>
@@ -23,9 +27,26 @@ export function createFakeEditorDisk(initialFiles: Record<string, string> = {}):
   return {
     files,
     fs: {
-      writeFile: vi.fn(async ({ filePath, content }: { filePath: string; content: string }) => {
-        files.set(filePath, content)
-      }),
+      writeFile: vi.fn(
+        async ({
+          filePath,
+          content,
+          diskPrecondition
+        }: {
+          filePath: string
+          content: string
+          diskPrecondition?: FileWriteDiskPrecondition
+        }) => {
+          const diskConflict = diskPrecondition
+            ? compareDiskWritePrecondition(diskPrecondition, files.get(filePath) ?? null)
+            : null
+          if (diskConflict) {
+            return { ok: false, diskConflict }
+          }
+          files.set(filePath, content)
+          return { ok: true }
+        }
+      ),
       deletePath: vi.fn(async ({ targetPath }: { targetPath: string }) => {
         files.delete(targetPath)
       }),
@@ -120,11 +141,17 @@ export function createUntitledNoteStore(fileName: string): StoreApi<AppState> {
  * Suites whose tabs stand for files already loaded from disk: give each tab without one the
  * baseline a load would stamp, since saves with no known disk version are refused.
  */
-export function withLoadedBaselines<T extends Pick<StoreApi<AppState>, 'getState'>>(store: T): T {
+export function withLoadedBaselines<T extends Pick<StoreApi<AppState>, 'getState'>>(
+  store: T,
+  disk?: FakeEditorDisk
+): T {
   const state = store.getState()
   for (const file of state.openFiles) {
     if (file.lastKnownDiskSignature === undefined) {
-      state.setLastKnownDiskSignature(file.id, getDiskBaselineSignature(''))
+      const loaded = disk ? disk.files.get(file.filePath) : ''
+      if (loaded !== undefined) {
+        state.setLastKnownDiskSignature(file.id, getDiskBaselineSignature(loaded))
+      }
     }
   }
   return store

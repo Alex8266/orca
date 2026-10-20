@@ -15,13 +15,6 @@ export type FileWriteDiskPrecondition = {
 
 export type FileWriteDiskConflict = 'changed' | 'missing'
 
-/**
- * What a guarded write does on a host that predates `files.writeIfUnchanged`.
- * `compare-from-client` reads first and refuses on a mismatch or an unreadable file.
- * `unguarded-write` is the compatibility fallback: the plain write that host always took.
- */
-export type OlderHostDiskPreconditionFallback = 'compare-from-client' | 'unguarded-write'
-
 export type FileWriteResult = { ok: true } | { ok: false; diskConflict: FileWriteDiskConflict }
 
 export const FILE_WRITE_OK: FileWriteResult = { ok: true }

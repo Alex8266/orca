@@ -14,6 +14,8 @@ export const ORCA_EDITOR_EXTERNAL_FILE_CHANGE_EVENT = 'orca:editor-external-file
 export const ORCA_EDITOR_SAVE_FILE_EVENT = 'orca:editor-save-file'
 export const ORCA_EDITOR_SAVE_AND_CLOSE_EVENT = 'orca:save-and-close'
 export const ORCA_EDITOR_FILE_SAVED_EVENT = 'orca:editor-file-saved'
+// Why: a sibling tab's baseline moved to another tab's write; its cached text must move with it.
+export const ORCA_EDITOR_FILE_REBASELINED_EVENT = 'orca:editor-file-rebaselined'
 export const ORCA_EDITOR_REQUEST_CMD_SAVE_EVENT = 'orca:editor-request-cmd-save'
 export const ORCA_EDITOR_REQUEST_FILE_CLOSE_EVENT = 'orca:editor-request-file-close'
 

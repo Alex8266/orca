@@ -85,8 +85,7 @@ describe('editor saves guarded by the disk precondition', () => {
           diskPrecondition: {
             expectedSignature: getDiskBaselineSignature('original'),
             allowMissing: false
-          },
-          olderHostFallback: 'unguarded-write'
+          }
         })
       )
       expect(disk.files.get(PATH)).toBe('agent rewrite')
@@ -305,6 +304,50 @@ describe('editor saves guarded by the disk precondition', () => {
     }
   })
 
+  it('Keep My Edits restamps every tab sharing the model, so the next save goes through', async () => {
+    const disk = stubGuardedDisk({ [PATH]: 'B' })
+    const store = createEditorStore()
+    storeRef.current = store
+    store.setState({
+      worktreesByRepo: {
+        'repo-1': [
+          makeWorktree({ id: 'wt-1', repoId: 'repo-1', path: '/repo', hostId: 'local' }),
+          makeWorktree({ id: 'wt-2', repoId: 'repo-1', path: '/repo', hostId: 'local' })
+        ]
+      }
+    })
+    for (const worktreeId of ['wt-1', 'wt-2']) {
+      store.getState().openFile({
+        filePath: PATH,
+        relativePath: 'file.ts',
+        worktreeId,
+        language: 'typescript',
+        mode: 'edit'
+      })
+    }
+    const [editing, sibling] = store.getState().openFiles
+    for (const tab of [editing, sibling]) {
+      store.getState().setLastKnownDiskSignature(tab.id, getDiskBaselineSignature('A'))
+    }
+    store.getState().setEditorDraft(editing.id, 'mine')
+    store.getState().markFileDirty(editing.id, true)
+    store.getState().setExternalMutation(editing.id, 'changed')
+    mocks.readRuntimeFileContent.mockResolvedValue({ content: 'B', isBinary: false })
+
+    const cleanup = attachEditorAutosaveController(store)
+    try {
+      keepTabEditsOverExternalChange(store.getState().openFiles[0])
+      await requestEditorFileSave({ fileId: editing.id })
+
+      expect(disk.files.get(PATH)).toBe('mine')
+      expect(store.getState().openFiles.every((tab) => tab.externalMutation === undefined)).toBe(
+        true
+      )
+    } finally {
+      cleanup()
+    }
+  })
+
   it('guards a restored draft whose editor never mounted, for autosave and explicit save', async () => {
     const disk = stubGuardedDisk({ [PATH]: 'agent rewrite' })
     const store = createEditorStore()
@@ -391,70 +434,81 @@ describe('editor saves guarded by the disk precondition', () => {
   })
 })
 
-describe('editor saves through a remote host without the guarded write', () => {
+describe('editor saves through a remote host without the guarded write (client compare)', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     __clearSelfWriteRegistryForTests()
   })
 
-  it('falls back to the plain write instead of refusing the save', async () => {
-    clearRuntimeCompatibilityCacheForTests()
-    mocks.getConnectionIdForFile.mockReturnValue(undefined)
-    const status = createCompatibleRuntimeStatusResponse('runtime-env-1')
-    if (!status.ok) {
-      throw new Error('fixture status must succeed')
-    }
-    const capabilities = (status.result.capabilities ?? []).filter(
-      (capability) => capability !== FILE_WRITE_DISK_PRECONDITION_RUNTIME_CAPABILITY
-    )
-    const olderStatus = { ...status, result: { ...status.result, capabilities } }
-    const runtimeCall = vi.fn((args: RuntimeEnvironmentCallRequest) =>
-      Promise.resolve(
-        args.method === 'status.get'
-          ? olderStatus
-          : { ok: true, result: { ok: true }, _meta: { runtimeId: 'runtime-env-1' } }
-      )
-    )
-    const eventTarget = new EventTarget()
-    vi.stubGlobal('window', {
-      addEventListener: eventTarget.addEventListener.bind(eventTarget),
-      removeEventListener: eventTarget.removeEventListener.bind(eventTarget),
-      dispatchEvent: eventTarget.dispatchEvent.bind(eventTarget),
-      setTimeout: globalThis.setTimeout.bind(globalThis),
-      clearTimeout: globalThis.clearTimeout.bind(globalThis),
-      api: { fs: { writeFile: vi.fn() }, runtimeEnvironments: { call: runtimeCall } }
-    })
-    const store = createEditorStore()
-    store.setState({
-      worktreesByRepo: {
-        'repo-1': [makeWorktree({ id: 'wt-1', repoId: 'repo-1', path: '/remote/repo' })]
+  it.each([
+    { disk: 'original', written: true },
+    { disk: 'agent rewrite', written: false }
+  ])(
+    'compares from the client, then writes only if disk still matches ($disk)',
+    async ({ disk, written }) => {
+      clearRuntimeCompatibilityCacheForTests()
+      mocks.getConnectionIdForFile.mockReturnValue(undefined)
+      const status = createCompatibleRuntimeStatusResponse('runtime-env-1')
+      if (!status.ok) {
+        throw new Error('fixture status must succeed')
       }
-    })
-    store.getState().openFile({
-      filePath: '/remote/repo/file.ts',
-      relativePath: 'file.ts',
-      worktreeId: 'wt-1',
-      runtimeEnvironmentId: 'env-1',
-      language: 'typescript',
-      mode: 'edit'
-    })
-    store
-      .getState()
-      .setLastKnownDiskSignature('/remote/repo/file.ts', getDiskBaselineSignature('original'))
-    store.getState().setEditorDraft('/remote/repo/file.ts', 'edited')
-    store.getState().markFileDirty('/remote/repo/file.ts', true)
+      const capabilities = (status.result.capabilities ?? []).filter(
+        (capability) => capability !== FILE_WRITE_DISK_PRECONDITION_RUNTIME_CAPABILITY
+      )
+      const olderStatus = { ...status, result: { ...status.result, capabilities } }
+      const meta = { _meta: { runtimeId: 'runtime-env-1' } }
+      // The client-side compare reads the host's current text.
+      mocks.readRuntimeFileContent.mockResolvedValue({ content: disk, isBinary: false })
+      const runtimeCall = vi.fn((args: RuntimeEnvironmentCallRequest) =>
+        Promise.resolve(
+          args.method === 'status.get'
+            ? olderStatus
+            : args.method === 'files.read'
+              ? { ok: true, result: { content: disk, truncated: false, byteLength: 0 }, ...meta }
+              : { ok: true, result: { ok: true }, ...meta }
+        )
+      )
+      const eventTarget = new EventTarget()
+      vi.stubGlobal('window', {
+        addEventListener: eventTarget.addEventListener.bind(eventTarget),
+        removeEventListener: eventTarget.removeEventListener.bind(eventTarget),
+        dispatchEvent: eventTarget.dispatchEvent.bind(eventTarget),
+        setTimeout: globalThis.setTimeout.bind(globalThis),
+        clearTimeout: globalThis.clearTimeout.bind(globalThis),
+        api: { fs: { writeFile: vi.fn() }, runtimeEnvironments: { call: runtimeCall } }
+      })
+      const store = createEditorStore()
+      store.setState({
+        worktreesByRepo: {
+          'repo-1': [makeWorktree({ id: 'wt-1', repoId: 'repo-1', path: '/remote/repo' })]
+        }
+      })
+      store.getState().openFile({
+        filePath: '/remote/repo/file.ts',
+        relativePath: 'file.ts',
+        worktreeId: 'wt-1',
+        runtimeEnvironmentId: 'env-1',
+        language: 'typescript',
+        mode: 'edit'
+      })
+      store
+        .getState()
+        .setLastKnownDiskSignature('/remote/repo/file.ts', getDiskBaselineSignature('original'))
+      store.getState().setEditorDraft('/remote/repo/file.ts', 'edited')
+      store.getState().markFileDirty('/remote/repo/file.ts', true)
 
-    const cleanup = attachEditorAutosaveController(store)
-    try {
-      await requestEditorFileSave({ fileId: '/remote/repo/file.ts' })
-
-      const methods = runtimeCall.mock.calls.map(([args]) => args.method)
-      expect(methods).toContain('files.write')
-      expect(methods).not.toContain('files.writeIfUnchanged')
-      expect(methods).not.toContain('files.read')
-      expect(store.getState().openFiles[0]?.isDirty).toBe(false)
-    } finally {
-      cleanup()
+      const cleanup = attachEditorAutosaveController(store)
+      try {
+        const save = requestEditorFileSave({ fileId: '/remote/repo/file.ts' })
+        await (written ? save : expect(save).rejects.toThrow(/changed on disk/))
+        const methods = runtimeCall.mock.calls.map(([args]) => args.method)
+        expect(mocks.readRuntimeFileContent).toHaveBeenCalled()
+        expect(methods).not.toContain('files.writeIfUnchanged')
+        expect(methods.includes('files.write')).toBe(written)
+        expect(store.getState().openFiles[0]?.isDirty).toBe(!written)
+      } finally {
+        cleanup()
+      }
     }
-  })
+  )
 })

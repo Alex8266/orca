@@ -3,6 +3,7 @@ import { createEditorSaveQueue } from '../editor-save-queue'
 import { registerPendingEditorFlush } from '../editor-pending-flush'
 import {
   createEditorStore,
+  createFakeEditorDisk,
   stubEditorWindowWithDisk,
   withLoadedBaselines
 } from '../editor-autosave-controller-test-fixture'
@@ -10,7 +11,7 @@ import {
 afterEach(() => vi.unstubAllGlobals())
 
 function setup() {
-  const disk = stubEditorWindowWithDisk()
+  const disk = stubEditorWindowWithDisk(createFakeEditorDisk({ '/repo/data.csv': 'header\nold' }))
   const store = createEditorStore()
   store.getState().openFile({
     filePath: '/repo/data.csv',
@@ -22,7 +23,7 @@ function setup() {
   const file = store.getState().openFiles[0]!
   store.getState().setEditorDraft(file.id, 'header\nprevious')
   store.getState().markFileDirty(file.id, true)
-  const queue = createEditorSaveQueue(withLoadedBaselines(store))
+  const queue = createEditorSaveQueue(withLoadedBaselines(store, disk))
   return { disk, store, file, queue }
 }
 

@@ -82,7 +82,6 @@ it('guards section saves, marks a refusal as a section conflict, and overwrites 
   await act(() => result.current.handleSectionSaveRef.current(0))
   const guarded = { expectedSignature: getDiskBaselineSignature('loaded'), allowMissing: false }
   expect(mocks.writeRuntimeFile.mock.calls[0]?.[4]).toEqual(guarded)
-  expect(mocks.writeRuntimeFile.mock.calls[0]?.[5]).toBe('unguarded-write')
   const [[markConflict]] = setSections.mock.calls
   expect(markConflict(sections)).toEqual([{ ...sections[0], saveConflict: true }])
 
@@ -94,4 +93,40 @@ it('guards section saves, marks a refusal as a section conflict, and overwrites 
   mocks.writeRuntimeFile.mockResolvedValueOnce({ ok: true })
   await act(() => result.current.handleSectionSaveRef.current(0, 'overwrite'))
   expect(mocks.writeRuntimeFile.mock.calls[2]?.[4]).toBeUndefined()
+})
+
+it('treats an empty loaded file as a known version', async () => {
+  const empty: DiffSection = {
+    ...section(),
+    diffResult: {
+      kind: 'text',
+      originalContent: 'old',
+      modifiedContent: '',
+      originalIsBinary: false,
+      modifiedIsBinary: false
+    }
+  }
+  const sections = [empty]
+  const { result } = renderHook(() =>
+    useCombinedDiffSectionActions({
+      activeGroupId: undefined,
+      branchCompare: null,
+      canOpenWorkspaceFileBrowserForPath: () => false,
+      commitCompare: null,
+      file,
+      isAllMode: false,
+      isBranchMode: false,
+      isCommitMode: false,
+      sections,
+      sectionsRef: { current: sections },
+      setSectionHeights: vi.fn(),
+      setSections: vi.fn()
+    })
+  )
+  mocks.writeRuntimeFile.mockResolvedValueOnce({ ok: true })
+  await act(() => result.current.handleSectionSaveRef.current(0))
+  expect(mocks.writeRuntimeFile.mock.calls[0]?.[4]).toEqual({
+    expectedSignature: getDiskBaselineSignature(''),
+    allowMissing: false
+  })
 })

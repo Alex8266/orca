@@ -7,8 +7,7 @@ import {
   parseFileWriteResult,
   type FileWriteDiskConflict,
   type FileWriteDiskPrecondition,
-  type FileWriteResult,
-  type OlderHostDiskPreconditionFallback
+  type FileWriteResult
 } from '../../../shared/file-write-disk-precondition'
 import {
   getDiskBaselineSignature,
@@ -85,15 +84,14 @@ async function diskHoldsWrittenContent(
 
 /**
  * A guarded remote save. The host compares at write time when it serves `files.writeIfUnchanged`;
- * an older host gets `olderHostFallback`: a client-side compare before a plain write, or the plain write alone.
+ * an older host gets a client-side compare before a plain write.
  */
 export async function writeRemoteFileIfUnchanged(
   context: RemoteFileContext,
   filePath: string,
   content: string,
   params: RemoteFileWriteParams,
-  precondition: FileWriteDiskPrecondition,
-  olderHostFallback: OlderHostDiskPreconditionFallback = 'compare-from-client'
+  precondition: FileWriteDiskPrecondition
 ): Promise<FileWriteResult> {
   // Why once per save: a retry may follow a reconnect, never a re-pair to another host.
   const pairingRevision = captureRuntimeEnvironmentRequestRevision(context.target.environmentId)
@@ -108,9 +106,6 @@ export async function writeRemoteFileIfUnchanged(
               method: FILE_WRITE_IF_UNCHANGED_METHOD,
               params: { ...params, diskPrecondition: precondition }
             }
-          }
-          if (olderHostFallback === 'unguarded-write') {
-            return { params }
           }
           const diskConflict = await checkDiskPreconditionFromClient(
             context,

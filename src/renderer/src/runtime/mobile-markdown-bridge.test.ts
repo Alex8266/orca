@@ -9,7 +9,8 @@ import { registerPendingEditorFlush } from '../components/editor/editor-pending-
 import { useAppStore } from '../store'
 import { getDiskBaselineSignature } from '../../../shared/disk-baseline-signature'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../shared/constants'
-import { attachMobileMarkdownBridge, MOBILE_STALE_SAVE_MESSAGE } from './mobile-markdown-bridge'
+import { attachMobileMarkdownBridge } from './mobile-markdown-bridge'
+import { MOBILE_STALE_SAVE_MESSAGE } from './mobile-markdown-save-rollback'
 import {
   cleanupMobileMarkdownBridgeHarness,
   markdownUnifiedTab,
@@ -302,6 +303,8 @@ describe('mobile markdown bridge', () => {
       const tab = useAppStore.getState().openFiles.find((file) => file.id === tabId)
       expect(tab?.externalMutation).toBeUndefined()
       expect(tab?.isDirty).toBe(false)
+      // The baseline stamped from the phone's read is withdrawn with the failed save.
+      expect(tab?.lastKnownDiskSignature).toBeUndefined()
     } finally {
       detachAutosave()
       detachBridge()

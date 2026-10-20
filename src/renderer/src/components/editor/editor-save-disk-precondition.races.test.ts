@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  ORCA_EDITOR_FILE_REBASELINED_EVENT,
+  ORCA_EDITOR_FILE_SAVED_EVENT,
   ORCA_EDITOR_SAVE_AND_CLOSE_EVENT,
   requestEditorFileSave,
   requestEditorSaveQuiesce,
@@ -15,6 +17,7 @@ import {
   getWrittenContentDiskSignature
 } from '../../../../shared/disk-baseline-signature'
 import { GUARDED_PATH, openGuardedFile, stubGuardedDisk } from './editor-save-guarded-disk-fixture'
+import { makeWorktree } from '@/store/slices/worktrees-slice-test-fixtures'
 
 const mocks = vi.hoisted(() => ({ readRuntimeFileContent: vi.fn(), toastError: vi.fn() }))
 const storeRef = vi.hoisted((): { current: ReturnType<typeof createEditorStore> | null } => ({
@@ -125,6 +128,62 @@ describe('guarded editor saves under races', () => {
       )
     } finally {
       cleanup()
+    }
+  })
+
+  it("moves a clean sibling's cached text with its baseline, so a remount edits the written text", async () => {
+    const disk = stubGuardedDisk({ [GUARDED_PATH]: 'A' })
+    const store = createEditorStore()
+    store.setState({
+      worktreesByRepo: {
+        'repo-1': [
+          makeWorktree({ id: 'wt-1', repoId: 'repo-1', path: '/repo', hostId: 'local' }),
+          makeWorktree({ id: 'wt-2', repoId: 'repo-1', path: '/repo', hostId: 'local' })
+        ]
+      }
+    })
+    for (const worktreeId of ['wt-1', 'wt-2']) {
+      store.getState().openFile({
+        filePath: GUARDED_PATH,
+        relativePath: 'file.ts',
+        worktreeId,
+        language: 'typescript',
+        mode: 'edit'
+      })
+    }
+    const [saver, sibling] = store.getState().openFiles
+    for (const tab of [saver, sibling]) {
+      store.getState().setLastKnownDiskSignature(tab.id, getDiskBaselineSignature('A'))
+    }
+    // The panel's per-tab text cache, kept the way the panel keeps it.
+    const cache = new Map([
+      [saver.id, 'A'],
+      [sibling.id, 'A']
+    ])
+    const track = (event: Event): void => {
+      if (event instanceof CustomEvent) {
+        cache.set(event.detail.fileId, event.detail.content)
+      }
+    }
+    window.addEventListener(ORCA_EDITOR_FILE_SAVED_EVENT, track)
+    window.addEventListener(ORCA_EDITOR_FILE_REBASELINED_EVENT, track)
+    store.getState().setEditorDraft(saver.id, 'B')
+    store.getState().markFileDirty(saver.id, true)
+
+    const cleanup = attachEditorAutosaveController(store)
+    try {
+      await requestEditorFileSave({ fileId: saver.id })
+      expect(cache.get(sibling.id)).toBe('B')
+
+      // Remount the sibling from its cache, edit, and save.
+      store.getState().setEditorDraft(sibling.id, `${cache.get(sibling.id)} edited`)
+      store.getState().markFileDirty(sibling.id, true)
+      await requestEditorFileSave({ fileId: sibling.id })
+      expect(disk.files.get(GUARDED_PATH)).toBe('B edited')
+    } finally {
+      cleanup()
+      window.removeEventListener(ORCA_EDITOR_FILE_SAVED_EVENT, track)
+      window.removeEventListener(ORCA_EDITOR_FILE_REBASELINED_EVENT, track)
     }
   })
 

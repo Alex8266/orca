@@ -35,8 +35,7 @@ describe('editor save paths', () => {
     expect(source.split('writeRuntimeFile(')).toHaveLength(2)
     const writer = functionBody(source, 'writeEditorSave')
     expect(writer).toContain('writeRuntimeFile(')
-    // The plain write is reachable only as the writer layer's older-host fallback.
-    expect(writer).toContain('EDITOR_SAVE_OLDER_HOST_FALLBACK')
+    // Only the explicit Overwrite reaches the writer without a precondition.
     expect(writer).toContain("write.kind === 'guarded'")
   })
 

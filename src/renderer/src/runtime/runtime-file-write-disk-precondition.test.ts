@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { writeRuntimeFile } from './runtime-file-mutation-client'
 import {
   FILE_MUTATION_OWNERSHIP_RUNTIME_CAPABILITY,
@@ -157,43 +157,6 @@ describe('writeRuntimeFile disk precondition', () => {
     expect(result).toEqual({ ok: true })
     expect(writeCalls()).toHaveLength(1)
     expect(writeCalls()[0]?.params).not.toHaveProperty('diskPrecondition')
-  })
-
-  it('takes the plain write through an older host under the unguarded-write fallback', async () => {
-    const onRead = vi.fn()
-    serveHost({ enforcesPrecondition: false, diskContent: 'agent rewrite', onRead })
-    runtimeEnvironmentCall.mockResolvedValue(rpcOk({ ok: true }))
-
-    const result = await writeRuntimeFile(
-      remoteContext,
-      '/remote/repo/file.ts',
-      'edited',
-      undefined,
-      precondition,
-      'unguarded-write'
-    )
-
-    expect(result).toEqual({ ok: true })
-    expect(onRead).not.toHaveBeenCalled()
-    expect(writeCalls().map((call) => call.method)).toEqual(['files.write'])
-    expect(writeCalls()[0]?.params).not.toHaveProperty('diskPrecondition')
-  })
-
-  it('still sends the precondition to a supporting host under the unguarded-write fallback', async () => {
-    serveHost({ enforcesPrecondition: true })
-    runtimeEnvironmentCall.mockResolvedValue(rpcOk({ ok: false, diskConflict: 'changed' }))
-
-    const result = await writeRuntimeFile(
-      remoteContext,
-      '/remote/repo/file.ts',
-      'edited',
-      undefined,
-      precondition,
-      'unguarded-write'
-    )
-
-    expect(result).toEqual({ ok: false, diskConflict: 'changed' })
-    expect(writeCalls().map((call) => call.method)).toEqual(['files.writeIfUnchanged'])
   })
 
   it("decides support from the write path's own status probe, one per save", async () => {

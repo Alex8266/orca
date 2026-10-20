@@ -191,7 +191,7 @@ export function createWebFileMutationMethods(
   }
 
   return {
-    writeFile: async ({ filePath, content, diskPrecondition, olderHostFallback }) => {
+    writeFile: async ({ filePath, content, diskPrecondition }) => {
       const session = dependencies.captureSession()
       const file = await session.resolveFilePath(filePath)
       const params = { relativePath: file.relativePath, content }
@@ -210,9 +210,6 @@ export function createWebFileMutationMethods(
                 method: FILE_WRITE_IF_UNCHANGED_METHOD,
                 params: { ...params, diskPrecondition }
               }
-            }
-            if (olderHostFallback === 'unguarded-write') {
-              return { method: 'files.write', params }
             }
             const diskConflict = await checkWebDiskPreconditionFromClient(
               session,

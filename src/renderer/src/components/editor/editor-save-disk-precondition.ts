@@ -2,10 +2,7 @@ import type { AppState } from '@/store'
 import type { OpenFile } from '@/store/slices/editor'
 import { toEditorModelUri } from './editor-model-uri'
 import { getEditorModelOwnerKey } from './editor-model-owner'
-import type {
-  FileWriteResult,
-  OlderHostDiskPreconditionFallback
-} from '../../../../shared/file-write-disk-precondition'
+import type { FileWriteResult } from '../../../../shared/file-write-disk-precondition'
 import type { LocalFileAccess } from '../../../../shared/local-file-access'
 import type { RuntimeFileOperationArgs } from '@/runtime/runtime-file-client-types'
 import { writeRuntimeFile } from '@/runtime/runtime-file-mutation-client'
@@ -27,12 +24,6 @@ export type EditorSaveResult = 'written' | 'blocked-stale' | 'failed'
 export const EDITOR_STALE_SAVE_MESSAGE =
   'This file changed on disk since your edits. Use the banner to compare, reload, or overwrite.'
 
-/**
- * Compatibility fallback: a host without `files.writeIfUnchanged` takes the plain write editor
- * saves always used, so saving against an older remote keeps working (unguarded there).
- */
-export const EDITOR_SAVE_OLDER_HOST_FALLBACK: OlderHostDiskPreconditionFallback = 'unguarded-write'
-
 /** The Monaco model a tab edits; tabs of one file on one host share it, and so share its text. */
 export function editorTabModelUri(state: AppState, file: OpenFile): string {
   return toEditorModelUri(file.filePath, getEditorModelOwnerKey(file, state))
@@ -52,8 +43,8 @@ export function editorModelSiblingTabs(state: AppState, file: OpenFile): OpenFil
 
 /**
  * What an editor save may do. There is no plain-write case: a save is either compared against a
- * known disk version, the banner's explicit Overwrite, or refused. Only the writer layer may fall
- * back to a plain write, and only for a host without the guarded write.
+ * known disk version, the banner's explicit Overwrite, or refused. A host without the guarded
+ * write gets the writer's compatibility fallback: the client reads and compares, then writes.
  */
 export type EditorSavePrecondition =
   | { kind: 'guarded'; signature: string; allowMissing: boolean }
@@ -105,8 +96,7 @@ export function writeEditorSave(
     access,
     write.kind === 'guarded'
       ? { expectedSignature: write.signature, allowMissing: write.allowMissing }
-      : undefined,
-    EDITOR_SAVE_OLDER_HOST_FALLBACK
+      : undefined
   )
 }
 

@@ -94,7 +94,7 @@ describe('untitled note save lifecycle', () => {
     ]
   ])('keeps the typed note after %s', async (_route, saveAndClose) => {
     loadFromDisk(store, '')
-    const cleanup = attachEditorAutosaveController(withLoadedBaselines(store))
+    const cleanup = attachEditorAutosaveController(withLoadedBaselines(store, disk))
     try {
       typeInto(store, 'my note')
 
@@ -112,7 +112,7 @@ describe('untitled note save lifecycle', () => {
   })
 
   it('deletes the note when its last save emptied it', async () => {
-    const cleanup = attachEditorAutosaveController(withLoadedBaselines(store))
+    const cleanup = attachEditorAutosaveController(withLoadedBaselines(store, disk))
     try {
       typeInto(store, 'a')
       await vi.advanceTimersByTimeAsync(1500)
@@ -140,7 +140,7 @@ describe('untitled note save lifecycle', () => {
           }
         })
     )
-    const cleanup = attachEditorAutosaveController(withLoadedBaselines(store))
+    const cleanup = attachEditorAutosaveController(withLoadedBaselines(store, disk))
     try {
       typeInto(store, 'my note')
       await vi.advanceTimersByTimeAsync(1500)
