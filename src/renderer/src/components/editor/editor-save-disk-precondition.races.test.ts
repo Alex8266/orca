@@ -187,6 +187,111 @@ describe('guarded editor saves under races', () => {
     }
   })
 
+  function openSharedModelTabs(disk: string) {
+    const store = createEditorStore()
+    storeRef.current = store
+    store.setState({
+      worktreesByRepo: {
+        'repo-1': [
+          makeWorktree({ id: 'wt-1', repoId: 'repo-1', path: '/repo', hostId: 'local' }),
+          makeWorktree({ id: 'wt-2', repoId: 'repo-1', path: '/repo', hostId: 'local' })
+        ]
+      }
+    })
+    for (const worktreeId of ['wt-1', 'wt-2']) {
+      store.getState().openFile({
+        filePath: GUARDED_PATH,
+        relativePath: 'file.ts',
+        worktreeId,
+        language: 'typescript',
+        mode: 'edit'
+      })
+    }
+    const [a, b] = store.getState().openFiles
+    for (const tab of [a, b]) {
+      store.getState().setLastKnownDiskSignature(tab.id, getDiskBaselineSignature(disk))
+    }
+    return { store, a, b }
+  }
+
+  it('lets concurrent identical saves from sibling tabs both succeed with one write', async () => {
+    const gate = deferred()
+    const disk = stubGuardedDisk({ [GUARDED_PATH]: 'A' }, () => gate.promise)
+    const { store, a, b } = openSharedModelTabs('A')
+    for (const tab of [a, b]) {
+      store.getState().setEditorDraft(tab.id, 'X')
+      store.getState().markFileDirty(tab.id, true)
+    }
+
+    const cleanup = attachEditorAutosaveController(store)
+    try {
+      const saves = Promise.all([
+        requestEditorFileSave({ fileId: a.id }),
+        requestEditorFileSave({ fileId: b.id })
+      ])
+      gate.resolve()
+      await saves
+
+      expect(disk.writeFile).toHaveBeenCalledTimes(1)
+      expect(disk.files.get(GUARDED_PATH)).toBe('X')
+      for (const tab of store.getState().openFiles) {
+        expect(tab.isDirty).toBe(false)
+        expect(tab.externalMutation).toBeUndefined()
+      }
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('makes Cmd+S in one tab wait for Keep My Edits in its sibling', async () => {
+    const disk = stubGuardedDisk({ [GUARDED_PATH]: 'B' })
+    const { store, a, b } = openSharedModelTabs('A')
+    for (const tab of [a, b]) {
+      store.getState().setEditorDraft(tab.id, 'mine')
+      store.getState().markFileDirty(tab.id, true)
+    }
+    store.getState().setExternalMutation(a.id, 'changed')
+    const read = deferred<{ content: string; isBinary: boolean }>()
+    mocks.readRuntimeFileContent.mockReturnValue(read.promise)
+
+    const cleanup = attachEditorAutosaveController(store)
+    try {
+      keepTabEditsOverExternalChange(store.getState().openFiles[0])
+      const save = requestEditorFileSave({ fileId: b.id })
+      read.resolve({ content: 'B', isBinary: false })
+      await save
+      expect(disk.files.get(GUARDED_PATH)).toBe('mine')
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('keeps the kept edits when a clean sibling remounts, types and saves after Keep', async () => {
+    const disk = stubGuardedDisk({ [GUARDED_PATH]: 'agent rewrite' })
+    const { store, a, b } = openSharedModelTabs('A')
+    store.getState().setEditorDraft(a.id, 'kept edits')
+    store.getState().markFileDirty(a.id, true)
+    store.getState().setExternalMutation(a.id, 'changed')
+    mocks.readRuntimeFileContent.mockResolvedValue({ content: 'agent rewrite', isBinary: false })
+
+    const cleanup = attachEditorAutosaveController(store)
+    try {
+      keepTabEditsOverExternalChange(store.getState().openFiles[0])
+      await vi.advanceTimersByTimeAsync(0)
+
+      // The sibling remounts from its draft (which wins over any cache), then the user types.
+      const remounted = store.getState().editorDrafts[b.id]
+      expect(remounted).toBe('kept edits')
+      store.getState().setEditorDraft(b.id, `${remounted} + typed`)
+      store.getState().markFileDirty(b.id, true)
+      await requestEditorFileSave({ fileId: b.id })
+
+      expect(disk.files.get(GUARDED_PATH)).toBe('kept edits + typed')
+    } finally {
+      cleanup()
+    }
+  })
+
   it('reports a refused explicit save with the stale-file message', async () => {
     stubGuardedDisk({ [GUARDED_PATH]: 'agent rewrite' })
     const store = createEditorStore()

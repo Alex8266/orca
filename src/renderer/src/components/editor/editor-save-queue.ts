@@ -7,7 +7,6 @@ import {
   canAutoSaveOpenFile,
   isAutosaveSuspendedForFile,
   normalizeAutoSaveDelayMs,
-  ORCA_EDITOR_FILE_REBASELINED_EVENT,
   ORCA_EDITOR_FILE_SAVED_EVENT,
   type EditorFileSavedDetail
 } from './editor-autosave'
@@ -21,14 +20,13 @@ import { getDiskBaselineSignature } from './diff-content-signature'
 import { trackExternalChangeConflictAction } from './editor-external-change-telemetry'
 import { editorTabFileAccess } from '@/lib/local-file-access'
 import { isEditorLargePasteInFlight } from './editor-large-paste-in-flight'
+import { rebaselineAfterEditorWrite, waitForModelBaselineRestamps } from './editor-save-rebaseline'
 import { getWrittenContentDiskSignature } from '../../../../shared/disk-baseline-signature'
 import type { FileWriteResult } from '../../../../shared/file-write-disk-precondition'
 import {
   editorModelSiblingTabs,
   editorSavePrecondition,
   editorTabModelUri,
-  noteEditorBaselineWrite,
-  waitForEditorBaselineRestamp,
   writeEditorSave,
   type EditorSaveResult,
   type EditorSaveTrigger
@@ -53,8 +51,16 @@ export type EditorSaveQueue = {
 export function createEditorSaveQueue(store: AppStoreApi): EditorSaveQueue {
   const autoSaveTimers = new Map<string, number>()
   const autoSaveScheduledContent = new Map<string, string>()
+  // Why keyed by model: sibling tabs share one text and baseline, so their saves must run in turn.
   const saveQueue = new Map<string, Promise<EditorSaveResult>>()
+  const writtenWhileQueued = new Map<string, string>()
   const saveGeneration = new Map<string, number>()
+
+  const saveQueueKey = (fileId: string): string => {
+    const state = store.getState()
+    const file = state.openFiles.find((openFile) => openFile.id === fileId)
+    return file?.mode === 'edit' ? editorTabModelUri(state, file) : fileId
+  }
 
   const clearAutoSaveTimer = (fileId: string): void => {
     const timerId = autoSaveTimers.get(fileId)
@@ -76,12 +82,13 @@ export function createEditorSaveQueue(store: AppStoreApi): EditorSaveQueue {
   ): Promise<EditorSaveResult> => {
     clearAutoSaveTimer(file.id)
     const queuedGeneration = saveGeneration.get(file.id) ?? 0
+    const queueKey = saveQueueKey(file.id)
 
-    const previousSave = saveQueue.get(file.id) ?? Promise.resolve()
+    const previousSave = saveQueue.get(queueKey) ?? Promise.resolve()
     const queuedSave = previousSave
       .catch(() => undefined)
       .then(async (): Promise<EditorSaveResult> => {
-        await waitForEditorBaselineRestamp(file.id)
+        await waitForModelBaselineRestamps(store.getState(), file)
         if ((saveGeneration.get(file.id) ?? 0) !== queuedGeneration) {
           return 'failed'
         }
@@ -124,6 +131,17 @@ export function createEditorSaveQueue(store: AppStoreApi): EditorSaveQueue {
           liveFile.lastKnownDiskSignature === getDiskBaselineSignature(contentToSave)
         ) {
           return 'failed'
+        }
+        // Why: a sibling just wrote this exact text and moved this tab's baseline to it.
+        if (
+          writtenWhileQueued.get(queueKey) === contentToSave &&
+          liveFile.lastKnownDiskSignature === getWrittenContentDiskSignature(contentToSave)
+        ) {
+          if (store.getState().editorDrafts[file.id] === contentToSave) {
+            store.getState().clearEditorDraft(file.id)
+            store.getState().markFileDirty(file.id, false)
+          }
+          return 'written'
         }
         const worktree = liveFile.worktreeId
           ? findWorktreeById(state.worktreesByRepo ?? {}, liveFile.worktreeId)
@@ -178,27 +196,8 @@ export function createEditorSaveQueue(store: AppStoreApi): EditorSaveQueue {
         }
 
         // Why before the superseded check: disk holds this text either way, so the next save compares against it.
-        noteEditorBaselineWrite(file.id)
-        // Why computed: the signature of what a UTF-8 write leaves on disk, with no extra stat.
-        const writtenSignature = getWrittenContentDiskSignature(contentToSave)
-        store.getState().setLastKnownDiskSignature(file.id, writtenSignature)
-        // Why: tabs sharing this model show the written text too; one holding other text keeps its old baseline.
-        for (const sibling of siblings) {
-          const siblingDraft = store.getState().editorDrafts[sibling.id]
-          if (
-            sibling.id !== file.id &&
-            (siblingDraft === undefined || siblingDraft === contentToSave)
-          ) {
-            noteEditorBaselineWrite(sibling.id)
-            store.getState().setLastKnownDiskSignature(sibling.id, writtenSignature)
-            // Why: fingerprint and cached text move together, or a remount pushes stale text.
-            window.dispatchEvent(
-              new CustomEvent<EditorFileSavedDetail>(ORCA_EDITOR_FILE_REBASELINED_EVENT, {
-                detail: { fileId: sibling.id, content: contentToSave }
-              })
-            )
-          }
-        }
+        writtenWhileQueued.set(queueKey, contentToSave)
+        rebaselineAfterEditorWrite(store.getState, file.id, siblings, contentToSave)
         if ((saveGeneration.get(file.id) ?? 0) !== queuedGeneration) {
           return 'written'
         }
@@ -231,18 +230,19 @@ export function createEditorSaveQueue(store: AppStoreApi): EditorSaveQueue {
 
     let trackedSave: Promise<EditorSaveResult>
     trackedSave = queuedSave.finally(() => {
-      if (saveQueue.get(file.id) === trackedSave) {
-        saveQueue.delete(file.id)
+      if (saveQueue.get(queueKey) === trackedSave) {
+        saveQueue.delete(queueKey)
+        writtenWhileQueued.delete(queueKey)
       }
     })
-    saveQueue.set(file.id, trackedSave)
+    saveQueue.set(queueKey, trackedSave)
     return trackedSave
   }
 
   const quiesceFileSave = async (fileId: string): Promise<void> => {
     // Why: rich markdown debounces serialization, so force the pending draft out before we cancel timers.
     flushPendingEditorChange(fileId)
-    const pendingSave = saveQueue.get(fileId)
+    const pendingSave = saveQueue.get(saveQueueKey(fileId))
     clearAutoSaveTimer(fileId)
     bumpSaveGeneration(fileId)
     await pendingSave?.catch(() => undefined)
@@ -309,6 +309,7 @@ export function createEditorSaveQueue(store: AppStoreApi): EditorSaveQueue {
     autoSaveTimers.clear()
     autoSaveScheduledContent.clear()
     saveQueue.clear()
+    writtenWhileQueued.clear()
     saveGeneration.clear()
   }
 

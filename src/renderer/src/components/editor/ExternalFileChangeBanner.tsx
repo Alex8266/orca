@@ -18,7 +18,6 @@ import {
   isEditorBaselineRestampSuperseded,
   trackEditorBaselineRestamp
 } from './editor-save-disk-precondition'
-import { ORCA_EDITOR_FILE_REBASELINED_EVENT, type EditorFileSavedDetail } from './editor-autosave'
 
 // Why: when an external process (usually an agent) rewrites a file while the
 // tab holds unsaved edits, the reload pipeline preserves the buffer and marks
@@ -124,20 +123,21 @@ export function keepTabEditsOverExternalChange(file: OpenFile): void {
       return
     }
     const signature = getDiskBaselineSignature(result.content)
-    // Why: tabs sharing the model must agree on its baseline, or the next save is refused again.
+    current.setLastKnownDiskSignature(file.id, signature)
+    const keptText = current.editorDrafts[file.id]
+    if (keptText === undefined) {
+      return
+    }
+    // Why: tabs sharing the model show the kept text, so they take it with the baseline it now
+    // overwrites; giving them the disk text would let a remount replace the kept edits.
     for (const tab of editorModelSiblingTabs(current, liveFile)) {
-      if (tab.id !== file.id && isEditorBaselineRestampSuperseded(tab.id)) {
+      if (tab.id === file.id || isEditorBaselineRestampSuperseded(tab.id)) {
         continue
       }
+      current.setEditorDraft(tab.id, keptText)
+      current.markFileDirty(tab.id, true)
+      current.setExternalMutation(tab.id, null)
       current.setLastKnownDiskSignature(tab.id, signature)
-      if (tab.id !== file.id && current.editorDrafts[tab.id] === undefined) {
-        // Why: a clean sibling's cached text must move with its baseline.
-        window.dispatchEvent(
-          new CustomEvent<EditorFileSavedDetail>(ORCA_EDITOR_FILE_REBASELINED_EVENT, {
-            detail: { fileId: tab.id, content: result.content }
-          })
-        )
-      }
     }
   })
   trackEditorBaselineRestamp(file.id, restamp)
