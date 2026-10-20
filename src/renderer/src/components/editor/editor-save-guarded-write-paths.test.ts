@@ -56,6 +56,13 @@ describe('editor save paths', () => {
     }
   )
 
+  it('grants overwrite consent only from the conflict banner', () => {
+    const grants = sourceFiles(join(EDITOR_DIR, '..', '..'))
+      .filter((path) => /overwrite: true|\? 'overwrite'/.test(readFileSync(path, 'utf8')))
+      .map((path) => relative(EDITOR_DIR, path).split('\\').join('/'))
+    expect(grants.sort()).toEqual(['ExternalFileChangeBanner.tsx', 'editor-autosave-controller.ts'])
+  })
+
   it('drops the queue guard only for the explicit Overwrite, whatever the tab mode', () => {
     const source = readFileSync(join(EDITOR_DIR, 'editor-save-disk-precondition.ts'), 'utf8')
     const body = source.slice(source.indexOf('export function editorSaveDiskPrecondition'))

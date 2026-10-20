@@ -23,7 +23,7 @@ import { getDiskBaselineSignature } from '../../../../../../shared/disk-baseline
 import { EDITOR_SAVE_OLDER_HOST_FALLBACK } from '../../editor-save-disk-precondition'
 
 const SECTION_STALE_MESSAGE =
-  'This file changed on disk since this section loaded. Save again to overwrite it.'
+  'This file changed on disk since this section loaded. Open the file to review it before saving.'
 
 export type CombinedDiffSectionActions = {
   handleSectionSaveRef: DiffSectionItemProps['handleSectionSaveRef']
@@ -63,7 +63,6 @@ export function useCombinedDiffSectionActions({
   const openBranchDiff = useAppStore((s) => s.openBranchDiff)
   const openCommitDiff = useAppStore((s) => s.openCommitDiff)
   const modifiedEditorsRef = useRef<Map<number, monacoEditor.IStandaloneCodeEditor>>(new Map())
-  const staleRefusedSectionKeysRef = useRef(new Set<string>())
 
   const openSection = useCallback(
     (index: number) => {
@@ -175,8 +174,6 @@ export function useCombinedDiffSectionActions({
       const sectionKey = section.key
       const content = modifiedEditor?.getValue() ?? section.modifiedContent
       const absolutePath = joinPath(file.filePath, section.path)
-      // Why: a save right after a refusal for this section is the user's overwrite.
-      const overwrite = staleRefusedSectionKeysRef.current.delete(sectionKey)
       // Why: edits live in modifiedContent; the diff result keeps the text loaded from (or last
       // written to) disk, unless a large diff pruned it, in which case no version is known.
       const loaded =
@@ -184,9 +181,8 @@ export function useCombinedDiffSectionActions({
         !(section.diffResult.modifiedContent === '' && section.largeDiffRenderLimit?.limited)
           ? section.diffResult.modifiedContent
           : undefined
-      const diskPrecondition = overwrite
-        ? undefined
-        : loaded !== undefined
+      const diskPrecondition =
+        loaded !== undefined
           ? { expectedSignature: getDiskBaselineSignature(loaded) }
           : missingOrIdenticalPrecondition(content)
       try {
@@ -211,7 +207,6 @@ export function useCombinedDiffSectionActions({
           EDITOR_SAVE_OLDER_HOST_FALLBACK
         )
         if (!writeResult.ok) {
-          staleRefusedSectionKeysRef.current.add(sectionKey)
           toast.error(
             translate(
               'auto.components.editor.editor.save.sectionStale.notice',

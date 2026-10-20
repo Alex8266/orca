@@ -3,7 +3,10 @@ import { requestEditorFileSave } from './editor-autosave'
 import { attachEditorAutosaveController } from './editor-autosave-controller'
 import { __clearSelfWriteRegistryForTests } from './editor-self-write-registry'
 import { createEditorStore } from './editor-autosave-controller-test-fixture'
-import { keepTabEditsOverExternalChange } from './ExternalFileChangeBanner'
+import {
+  keepTabEditsOverExternalChange,
+  overwriteDiskWithTabEdits
+} from './ExternalFileChangeBanner'
 import {
   getDiskBaselineSignature,
   getWrittenContentDiskSignature
@@ -101,7 +104,7 @@ describe('editor saves guarded by the disk precondition', () => {
     }
   })
 
-  it('rejects an explicit save over an unnoticed change, then overwrites once the banner shows', async () => {
+  it('keeps refusing explicit saves while the banner shows; only its Overwrite writes', async () => {
     const disk = stubGuardedDisk({ [PATH]: 'agent rewrite' })
     const store = createEditorStore()
     openFile(store, { baseline: 'original', draft: 'user edit' })
@@ -112,8 +115,11 @@ describe('editor saves guarded by the disk precondition', () => {
       expect(disk.files.get(PATH)).toBe('agent rewrite')
       expect(store.getState().openFiles[0]?.externalMutation).toBe('changed')
 
-      // Saving with the banner up is the overwrite choice: a plain write.
-      await requestEditorFileSave({ fileId: PATH })
+      // Cmd+S again (from the editor or a preview) is not consent.
+      await expect(requestEditorFileSave({ fileId: PATH })).rejects.toThrow(/changed on disk/)
+      expect(disk.files.get(PATH)).toBe('agent rewrite')
+
+      expect(await overwriteDiskWithTabEdits(store.getState().openFiles[0])).toBe(true)
       expect(disk.writeFile).toHaveBeenLastCalledWith(
         expect.not.objectContaining({ diskPrecondition: expect.anything() })
       )
@@ -180,6 +186,27 @@ describe('editor saves guarded by the disk precondition', () => {
       expect(store.getState().openFiles.find((f) => f.id === takenPath)?.externalMutation).toBe(
         'changed'
       )
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('raises the banner when a save of a clean tab is refused', async () => {
+    const disk = stubGuardedDisk({ [PATH]: 'agent rewrite' })
+    const store = createEditorStore()
+    openFile(store, { baseline: 'original', draft: 'unused' })
+    store.getState().clearEditorDraft(PATH)
+    store.getState().markFileDirty(PATH, false)
+
+    const cleanup = attachEditorAutosaveController(store)
+    try {
+      // e.g. a Markdown save that only trims trailing whitespace, sent from a clean tab.
+      await expect(
+        requestEditorFileSave({ fileId: PATH, fallbackContent: 'original' })
+      ).rejects.toThrow(/changed on disk/)
+      expect(disk.files.get(PATH)).toBe('agent rewrite')
+      expect(store.getState().openFiles[0]?.isDirty).toBe(false)
+      expect(store.getState().openFiles[0]?.externalMutation).toBe('changed')
     } finally {
       cleanup()
     }

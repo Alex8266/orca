@@ -12,8 +12,9 @@ import type { OpenFile } from '@/store/slices/editor'
 import { ExternalFileChangeCompareDialog } from './ExternalFileChangeCompareDialog'
 import { getDiskBaselineSignature } from './diff-content-signature'
 import { trackExternalChangeConflictAction } from './editor-external-change-telemetry'
+import { attemptEditorFileSave } from './editor-file-save-attempt'
 import {
-  editorBaselineWriteEpoch,
+  isEditorBaselineRestampSuperseded,
   trackEditorBaselineRestamp
 } from './editor-save-disk-precondition'
 
@@ -96,7 +97,6 @@ export function keepTabEditsOverExternalChange(file: OpenFile): void {
     return
   }
   // Why tracked: a save right after Keep must compare against the disk the user chose to overwrite.
-  const writeEpochAtRead = editorBaselineWriteEpoch(file.id)
   const restamp = readRuntimeFileContent({
     target,
     filePath: file.filePath,
@@ -117,13 +117,18 @@ export function keepTabEditsOverExternalChange(file: OpenFile): void {
     if (
       !liveFile ||
       liveFile.externalMutation === 'changed' ||
-      editorBaselineWriteEpoch(file.id) !== writeEpochAtRead
+      isEditorBaselineRestampSuperseded(file.id)
     ) {
       return
     }
     current.setLastKnownDiskSignature(file.id, getDiskBaselineSignature(result.content))
   })
   trackEditorBaselineRestamp(file.id, restamp)
+}
+
+/** The banner's Overwrite: the one explicit consent to replace the newer disk content. */
+export function overwriteDiskWithTabEdits(file: OpenFile): Promise<boolean> {
+  return attemptEditorFileSave({ fileId: file.id, overwrite: true })
 }
 
 export function ExternalFileChangeBanner({
@@ -148,6 +153,9 @@ export function ExternalFileChangeBanner({
     trackExternalChangeConflictAction(file, 'keep')
     keepTabEditsOverExternalChange(file)
   }
+  const handleOverwrite = (): void => {
+    void overwriteDiskWithTabEdits(file)
+  }
   const handleCompare = (): void => {
     trackExternalChangeConflictAction(file, 'compare')
     setCompareOpen(true)
@@ -165,7 +173,7 @@ export function ExternalFileChangeBanner({
           <span className="min-w-0 font-medium text-foreground">
             {translate(
               'auto.components.editor.ExternalFileChangeBanner.7c41e90d12',
-              'This file changed on disk while you have unsaved edits. Saving will overwrite the newer disk content.'
+              'This file changed on disk while you have unsaved edits. Overwrite replaces the newer disk content.'
             )}
           </span>
         </div>
@@ -178,6 +186,9 @@ export function ExternalFileChangeBanner({
               'auto.components.editor.ExternalFileChangeBanner.3fa2b8d417',
               'Reload from Disk'
             )}
+          </Button>
+          <Button type="button" size="xs" variant="outline" onClick={handleOverwrite}>
+            {translate('auto.components.editor.ExternalFileChangeBanner.overwrite', 'Overwrite')}
           </Button>
           <Button type="button" size="xs" variant="ghost" onClick={handleKeepEdits}>
             {translate(

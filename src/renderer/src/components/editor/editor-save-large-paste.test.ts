@@ -7,6 +7,8 @@ import { createEditorSaveQueue } from './editor-save-queue'
 import { toEditorModelUri } from './editor-model-uri'
 import { installMonacoEditorInputBindings } from './monaco-editor-input-bindings'
 import { MONACO_PASTE_DIRECT_MAX_BYTES } from './monaco-large-text-paste'
+import { compareDiskWritePrecondition } from '../../../../shared/file-write-disk-precondition'
+import type { GuardedWriteArgs } from './editor-save-guarded-disk-fixture'
 
 vi.mock('@/store', () => ({ useAppStore: { getState: () => ({}) } }))
 vi.mock('@/i18n/i18n', () => ({ translate: (_key: string, fallback: string) => fallback }))
@@ -51,10 +53,17 @@ function createSingleLineEditor(initial: string) {
   return { container, editorInstance: editorStub as unknown as editor.IStandaloneCodeEditor }
 }
 
-it('holds autosave while a chunked paste is in flight, then saves the pasted text guarded', async () => {
+/** A dirty tab at baseline 'base' with the real input bindings installed, then a large paste. */
+function pasteIntoGuardedTab(pasted: string) {
   const files = new Map([[PATH, 'base']])
-  const writeFile = vi.fn(async ({ filePath, content }: { filePath: string; content: string }) => {
-    files.set(filePath, content)
+  const writeFile = vi.fn(async (args: GuardedWriteArgs) => {
+    const conflict = args.diskPrecondition
+      ? compareDiskWritePrecondition(args.diskPrecondition, files.get(args.filePath) ?? null)
+      : null
+    if (conflict) {
+      return { ok: false, diskConflict: conflict }
+    }
+    files.set(args.filePath, args.content)
     return { ok: true }
   })
   vi.stubGlobal('api', { fs: { writeFile } })
@@ -89,10 +98,16 @@ it('holds autosave while a chunked paste is in flight, then saves the pasted tex
     setSelectionAnnotationTarget: vi.fn()
   })
 
-  const pasted = 'x'.repeat(MONACO_PASTE_DIRECT_MAX_BYTES * 2)
   const paste = new Event('paste', { cancelable: true })
   Object.defineProperty(paste, 'clipboardData', { value: { getData: () => pasted } })
   container.dispatchEvent(paste)
+
+  return { files, writeFile, store, queue, onContentChange }
+}
+
+it('holds autosave while a chunked paste is in flight, then saves the pasted text guarded', async () => {
+  const pasted = 'x'.repeat(MONACO_PASTE_DIRECT_MAX_BYTES * 2)
+  const { files, writeFile, store, queue, onContentChange } = pasteIntoGuardedTab(pasted)
 
   // Mid-paste the draft still holds the pre-paste text; autosave must not write it.
   expect(await queue.queueSave(store.getState().openFiles[0], 'base', 'autosave')).toBe('failed')
@@ -106,5 +121,23 @@ it('holds autosave while a chunked paste is in flight, then saves the pasted tex
       diskPrecondition: { expectedSignature: getDiskBaselineSignature('base'), allowMissing: false }
     })
   )
+  queue.dispose()
+})
+
+it('refuses a save after a 70 KiB paste when an agent wrote the file meanwhile', async () => {
+  const pasted = 'y'.repeat(70 * 1024)
+  const { files, writeFile, store, queue, onContentChange } = pasteIntoGuardedTab(pasted)
+  await vi.waitFor(() => expect(onContentChange).toHaveBeenCalled())
+  files.set(PATH, 'agent rewrite')
+
+  expect(await queue.queueSave(store.getState().openFiles[0], 'base', 'user')).toBe('blocked-stale')
+  expect(writeFile).toHaveBeenCalledWith(
+    expect.objectContaining({
+      content: `${pasted}base`,
+      diskPrecondition: { expectedSignature: getDiskBaselineSignature('base'), allowMissing: true }
+    })
+  )
+  expect(files.get(PATH)).toBe('agent rewrite')
+  expect(store.getState().openFiles[0]?.externalMutation).toBe('changed')
   queue.dispose()
 })

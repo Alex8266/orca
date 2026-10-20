@@ -111,8 +111,8 @@ describe('guarded editor saves under races', () => {
 
     const cleanup = attachEditorAutosaveController(store)
     try {
-      // An explicit overwrite is already writing when the user clicks Keep.
-      const save = requestEditorFileSave({ fileId: GUARDED_PATH })
+      // An Overwrite is already writing when the user clicks Keep.
+      const save = requestEditorFileSave({ fileId: GUARDED_PATH, overwrite: true })
       await vi.advanceTimersByTimeAsync(0)
       keepTabEditsOverExternalChange(store.getState().openFiles[0])
       gate.resolve()

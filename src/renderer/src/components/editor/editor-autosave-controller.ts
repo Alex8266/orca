@@ -95,7 +95,7 @@ export function attachEditorAutosaveController(store: AppStoreApi): () => void {
         return
       }
 
-      const result = await queueSave(file, content)
+      const result = await queueSave(file, content, detail.overwrite ? 'overwrite' : 'user')
       if (result !== 'written') {
         detail.reject(result === 'blocked-stale' ? EDITOR_STALE_SAVE_MESSAGE : NOT_SAVED_MESSAGE)
         return

@@ -60,7 +60,7 @@ function section(): DiffSection {
   }
 }
 
-it('guards a section save with its loaded signature, then overwrites on the next save', async () => {
+it('guards every section save with its loaded signature and reports a refusal', async () => {
   const sections = [section()]
   const setSections = vi.fn()
   const { result } = renderHook(() =>
@@ -89,8 +89,10 @@ it('guards a section save with its loaded signature, then overwrites on the next
   expect(mocks.toastError).toHaveBeenCalledWith(expect.stringMatching(/changed on disk/))
   expect(setSections).not.toHaveBeenCalled()
 
+  // Saving again is not consent to overwrite.
   mocks.writeRuntimeFile.mockResolvedValueOnce({ ok: true })
   await act(() => result.current.handleSectionSaveRef.current(0))
-  expect(mocks.writeRuntimeFile.mock.calls[1]?.[4]).toBeUndefined()
-  expect(setSections).toHaveBeenCalledTimes(1)
+  expect(mocks.writeRuntimeFile.mock.calls[1]?.[4]).toEqual({
+    expectedSignature: getDiskBaselineSignature('loaded')
+  })
 })

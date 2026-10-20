@@ -8,8 +8,11 @@ import {
   type OlderHostDiskPreconditionFallback
 } from '../../../../shared/file-write-disk-precondition'
 
-/** `user`: an explicit save (shortcut, save-and-close dialog). `restart`: the save-all before a restart. */
-export type EditorSaveTrigger = 'autosave' | 'user' | 'restart'
+/**
+ * `user`: an explicit save (shortcut, save-and-close dialog, mobile). `restart`: the save-all before a
+ * restart. `overwrite`: the conflict banner's Overwrite, the only consent to replace a disk change.
+ */
+export type EditorSaveTrigger = 'autosave' | 'user' | 'restart' | 'overwrite'
 
 /**
  * `written`: disk holds the text. `blocked-stale`: the host refused because disk moved on since the
@@ -19,7 +22,7 @@ export type EditorSaveTrigger = 'autosave' | 'user' | 'restart'
 export type EditorSaveResult = 'written' | 'blocked-stale' | 'failed'
 
 export const EDITOR_STALE_SAVE_MESSAGE =
-  'This file changed on disk since your edits. Review the banner, then save again to overwrite.'
+  'This file changed on disk since your edits. Use the banner to compare, reload, or overwrite.'
 
 /**
  * Compatibility fallback: a host without `files.writeIfUnchanged` takes the plain write editor
@@ -56,12 +59,8 @@ export function editorSaveDiskPrecondition(
   content: string,
   trigger: EditorSaveTrigger
 ): FileWriteDiskPrecondition | null | 'unknown-baseline' {
-  // Why: the banner says saving overwrites the disk version; an explicit save is that Overwrite.
-  // A tab already marked deleted is recreated by an explicit save, as before.
-  if (
-    trigger === 'user' &&
-    (file.externalMutation === 'changed' || file.externalMutation === 'deleted')
-  ) {
+  // Why: only the visible banner's Overwrite may replace a disk change the user was shown.
+  if (trigger === 'overwrite') {
     return null
   }
   // Why skip clean unloaded tabs: they hold no text yet, so they can't disagree about it.
@@ -80,25 +79,30 @@ export function editorSaveDiskPrecondition(
   return { expectedSignature: baseline, allowMissing: trigger !== 'autosave' }
 }
 
+// Why both clear when the read settles: entries live only while a Keep My Edits read is pending.
 const pendingBaselineRestamps = new Map<string, Promise<void>>()
-const baselineWriteEpochs = new Map<string, number>()
+const supersededBaselineRestamps = new Set<string>()
 
-/** Counts completed writes per tab, so a disk read that started before one can't restamp over it. */
+/** A completed write re-baselines the tab, so a Keep read that started earlier must not restamp. */
 export function noteEditorBaselineWrite(fileId: string): void {
-  baselineWriteEpochs.set(fileId, (baselineWriteEpochs.get(fileId) ?? 0) + 1)
+  if (pendingBaselineRestamps.has(fileId)) {
+    supersededBaselineRestamps.add(fileId)
+  }
 }
 
-export function editorBaselineWriteEpoch(fileId: string): number {
-  return baselineWriteEpochs.get(fileId) ?? 0
+export function isEditorBaselineRestampSuperseded(fileId: string): boolean {
+  return supersededBaselineRestamps.has(fileId)
 }
 
 /** Registers Keep My Edits' disk read so saves of that tab wait for its new baseline. */
 export function trackEditorBaselineRestamp(fileId: string, restamp: Promise<void>): void {
   const tracked = restamp.catch(() => undefined)
   pendingBaselineRestamps.set(fileId, tracked)
+  supersededBaselineRestamps.delete(fileId)
   void tracked.then(() => {
     if (pendingBaselineRestamps.get(fileId) === tracked) {
       pendingBaselineRestamps.delete(fileId)
+      supersededBaselineRestamps.delete(fileId)
     }
   })
 }

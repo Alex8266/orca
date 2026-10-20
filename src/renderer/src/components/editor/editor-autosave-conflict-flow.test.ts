@@ -175,7 +175,7 @@ describe('editor autosave changed-on-disk conflict flow', () => {
     }
   })
 
-  it('clears the changed-on-disk mark after a successful save', async () => {
+  it("clears the changed-on-disk mark after the banner's Overwrite", async () => {
     const writeFile = stubEditorWindow()
     const store = createEditorStore()
     openDirtyFile(store, 'user version')
@@ -183,7 +183,7 @@ describe('editor autosave changed-on-disk conflict flow', () => {
 
     const cleanup = attachEditorAutosaveController(store)
     try {
-      await requestEditorFileSave({ fileId: '/repo/file.ts' })
+      await requestEditorFileSave({ fileId: '/repo/file.ts', overwrite: true })
 
       expect(writeFile).toHaveBeenCalledWith({
         filePath: '/repo/file.ts',

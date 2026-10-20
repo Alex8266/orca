@@ -7,6 +7,7 @@ import {
 import { attachEditorAutosaveController } from '../components/editor/editor-autosave-controller'
 import { registerPendingEditorFlush } from '../components/editor/editor-pending-flush'
 import { useAppStore } from '../store'
+import { getDiskBaselineSignature } from '../../../shared/disk-baseline-signature'
 import { FLOATING_TERMINAL_WORKTREE_ID } from '../../../shared/constants'
 import { attachMobileMarkdownBridge } from './mobile-markdown-bridge'
 import {
@@ -241,6 +242,42 @@ describe('mobile markdown bridge', () => {
         ok: true,
         result: { content: 'mobile edit', isDirty: false }
       })
+    } finally {
+      detachAutosave()
+      detachBridge()
+    }
+  })
+
+  it('returns a failure to mobile, not an overwrite, when the desktop banner shows a disk change', async () => {
+    openMarkdownFile()
+    const tabId = useAppStore.getState().openFiles[0].id
+    useAppStore.getState().setLastKnownDiskSignature(tabId, getDiskBaselineSignature('older'))
+    useAppStore.getState().setExternalMutation(tabId, 'changed')
+    const readFile = vi.fn().mockResolvedValue({ content: 'original', isBinary: false })
+    // The host compares the precondition and refuses; a plain write would be the overwrite.
+    const writeFile = vi
+      .fn()
+      .mockImplementation(async ({ diskPrecondition }) =>
+        diskPrecondition ? { ok: false, diskConflict: 'changed' } : { ok: true }
+      )
+    setupWindow({ readFile, writeFile })
+    const detachBridge = attachMobileMarkdownBridge()
+    const detachAutosave = attachEditorAutosaveController(useAppStore as never)
+
+    try {
+      const response = await sendRequest({
+        id: 'save-stale',
+        operation: 'save',
+        worktreeId: 'wt-1',
+        tabId: 'tab-md',
+        baseVersion: hashMarkdownContent('original'),
+        content: 'mobile edit'
+      })
+
+      expect(writeFile).toHaveBeenCalledWith(
+        expect.objectContaining({ diskPrecondition: expect.anything() })
+      )
+      expect(response).toMatchObject({ id: 'save-stale', ok: false })
     } finally {
       detachAutosave()
       detachBridge()

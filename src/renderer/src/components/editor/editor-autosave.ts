@@ -38,6 +38,8 @@ export type EditorSaveQuiesceDetail = EditorSaveQuiesceTarget & {
 export type EditorSaveFileTarget = {
   fileId: string
   fallbackContent?: string
+  /** Only the conflict banner's Overwrite sets this. */
+  overwrite?: true
 }
 
 export type EditorSaveAndCloseDetail = {
