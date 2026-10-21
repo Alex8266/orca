@@ -410,29 +410,34 @@ describe('NativeChatComposer', () => {
     expect(mocks.setDraft).toHaveBeenCalledWith('')
   })
 
-  it('disables Send and blocks a send while an image attachment is still pending', () => {
-    mocks.imageAttachments = [{ id: 'image-1', path: '', pending: true }]
-    render(
-      <NativeChatComposer
-        terminalTabId="tab-1"
-        paneKey="tab-1:leaf-1"
-        targetPtyId="pty-1"
-        agent="codex"
-      />
-    )
+  it.each([false, true])(
+    'disables Send while an attachment is pending (working: %s)',
+    (isWorking) => {
+      mocks.imageAttachments = [{ id: 'image-1', path: '', pending: true }]
+      render(
+        <NativeChatComposer
+          terminalTabId="tab-1"
+          paneKey="tab-1:leaf-1"
+          targetPtyId="pty-1"
+          agent="codex"
+          isWorking={isWorking}
+          onStop={vi.fn()}
+        />
+      )
 
-    expect(mocks.fieldProps?.sendButtonDisabled).toBe(true)
+      expect(mocks.fieldProps?.sendButtonDisabled).toBe(true)
 
-    act(() => mocks.fieldProps?.onSend?.())
+      act(() => mocks.fieldProps?.onSend?.())
 
-    expect(mocks.sendNativeChatMessage).not.toHaveBeenCalled()
-    expect(mocks.sendNativeChatTypedCommand).not.toHaveBeenCalled()
-    expect(mocks.sendNativeChatMessageWithImageAttachments).not.toHaveBeenCalled()
-  })
+      expect(mocks.sendNativeChatMessage).not.toHaveBeenCalled()
+      expect(mocks.sendNativeChatTypedCommand).not.toHaveBeenCalled()
+      expect(mocks.sendNativeChatMessageWithImageAttachments).not.toHaveBeenCalled()
+    }
+  )
 
   it('enables Send and dispatches once a pending attachment resolves', () => {
     mocks.imageAttachments = [{ id: 'image-1', path: '', pending: true }]
-    const view = render(
+    const composer = () => (
       <NativeChatComposer
         terminalTabId="tab-1"
         paneKey="tab-1:leaf-1"
@@ -440,17 +445,11 @@ describe('NativeChatComposer', () => {
         agent="codex"
       />
     )
+    const view = render(composer())
     expect(mocks.fieldProps?.sendButtonDisabled).toBe(true)
 
     mocks.imageAttachments = [{ id: 'image-1', path: '/tmp/pasted.png' }]
-    view.rerender(
-      <NativeChatComposer
-        terminalTabId="tab-1"
-        paneKey="tab-1:leaf-1"
-        targetPtyId="pty-1"
-        agent="codex"
-      />
-    )
+    view.rerender(composer())
     expect(mocks.fieldProps?.sendButtonDisabled).toBe(false)
 
     act(() => mocks.fieldProps?.onSend?.())
