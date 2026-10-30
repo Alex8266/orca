@@ -15,6 +15,8 @@ import {
   waitForAbortedNavigationReplacement
 } from './agent-browser-bridge-process'
 import { AgentBrowserBridgeQueue } from './agent-browser-bridge-queue'
+import { captureScreenshot } from './cdp-screenshot'
+import type { ResolvedBrowserCommandTarget } from './agent-browser-bridge-types'
 
 export abstract class AgentBrowserBridgeCoreCommands extends AgentBrowserBridgeQueue {
   async snapshot(worktreeId?: string, browserPageId?: string): Promise<BrowserSnapshotResult> {
@@ -35,7 +37,8 @@ export abstract class AgentBrowserBridgeCoreCommands extends AgentBrowserBridgeQ
     worktreeId?: string,
     browserPageId?: string
   ): Promise<BrowserClickResult> {
-    return this.enqueueTargetedCommand(worktreeId, browserPageId, async (sessionName) => {
+    return this.enqueueTargetedCommand(worktreeId, browserPageId, async (sessionName, target) => {
+      await this.prepareSelectorClick(sessionName, target, element)
       return (await this.execAgentBrowser(sessionName, ['click', element])) as BrowserClickResult
     })
   }
@@ -45,9 +48,32 @@ export abstract class AgentBrowserBridgeCoreCommands extends AgentBrowserBridgeQ
     worktreeId?: string,
     browserPageId?: string
   ): Promise<BrowserClickResult> {
-    return this.enqueueTargetedCommand(worktreeId, browserPageId, async (sessionName) => {
+    return this.enqueueTargetedCommand(worktreeId, browserPageId, async (sessionName, target) => {
+      await this.prepareSelectorClick(sessionName, target, element)
       return (await this.execAgentBrowser(sessionName, ['dblclick', element])) as BrowserClickResult
     })
+  }
+
+  private async prepareSelectorClick(
+    sessionName: string,
+    target: ResolvedBrowserCommandTarget,
+    element: string
+  ): Promise<void> {
+    await this.execAgentBrowser(sessionName, ['scrollintoview', element])
+    if (
+      this.browserManager.getManagedBrowserGuestContext(target.webContentsId)?.owner === 'offscreen'
+    ) {
+      // Hidden pages need a painted frame before hit testing reflects the scroll.
+      await captureScreenshot(
+        this.requireTargetWebContents(target),
+        {
+          format: 'jpeg',
+          quality: 1,
+          clip: { x: 0, y: 0, width: 1, height: 1, scale: 1 }
+        },
+        () => this.browserManager.holdPaintForCapture(target.webContentsId)
+      )
+    }
   }
 
   async goto(url: string, worktreeId?: string, browserPageId?: string): Promise<BrowserGotoResult> {

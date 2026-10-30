@@ -17,6 +17,7 @@ import { parseCdpKeyEvent, imeFallbackKeyEvent } from './cdp-keyboard-us-layout'
 import { dispatchPageKeyEvent, type GuestCdpSender } from './guest-direct-key-input'
 import { sendGuestCdpCommand } from './guest-cdp-command'
 import { readRemoteCliAdmittedPage } from './remote-cli-page-admission'
+import { browserUrlWaitExpression } from './browser-url-wait-expression'
 import { AgentBrowserBridgeCaptureCommands } from './agent-browser-bridge-capture-commands'
 
 export abstract class AgentBrowserBridgeInteractionCommands extends AgentBrowserBridgeCaptureCommands {
@@ -82,7 +83,11 @@ export abstract class AgentBrowserBridgeInteractionCommands extends AgentBrowser
         args.push('--text', options.text)
       }
       if (options?.url) {
-        args.push('--url', options.url)
+        if (options.url.includes('*')) {
+          args.push('--fn', browserUrlWaitExpression(options.url))
+        } else {
+          args.push('--url', options.url)
+        }
       }
       if (options?.load) {
         args.push('--load', options.load)
